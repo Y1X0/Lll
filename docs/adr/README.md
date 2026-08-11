@@ -1,33 +1,28 @@
 # Architecture Decision Records (ADRs)
 
 Each ADR captures **context**, **options considered**, **decision**, and **consequences** for one
-significant architectural decision. ADRs are proposed here as part of Phase 0 (Discovery) and are to
-be reviewed and approved before the corresponding implementation phase begins.
-
-Format: [MADR](https://adr.github.io/madr/)-style. Status values: `Proposed`, `Accepted`,
-`Superseded`, `Deprecated`.
+significant architectural decision. ADRs are proposed in Phase 0 (Discovery) and reviewed/approved
+before the corresponding implementation phase. Format: [MADR](https://adr.github.io/madr/)-style.
+Status values: `Proposed`, `Accepted`, `Superseded`, `Deprecated`.
 
 ## Index
 
 | ADR | Title | Status |
 |---|---|---|
-| [0001](./0001-modular-monolith.md) | Modular monolith over microservices (first) | Proposed |
-| [0002](./0002-module-boundaries.md) | Module boundary & dependency rules | Proposed |
-| [0003](./0003-backend-fastapi-python.md) | FastAPI + Python 3.12 backend | Proposed |
-| [0004](./0004-postgresql-over-sqlite.md) | PostgreSQL over SQLite | Proposed |
-| [0005](./0005-identifier-strategy.md) | Identifier strategy (UUIDv7 / ULID / UUIDv5) | Proposed |
-| [0006](./0006-evidence-integrity.md) | Content-addressed WORM evidence store + multi-hash + signed manifests | Proposed |
-| [0007](./0007-append-only-audit.md) | Append-only, hash-chained audit + WORM anchoring | Proposed |
-| [0008](./0008-frontend-separation.md) | Separate React+Vite frontend, self-hosted (no CDN) | Proposed |
-| [0009](./0009-secrets-management.md) | Secrets via env (dev) / KMS (prod) | Proposed |
-| [0010](./0010-integration-gateway.md) | Single Authorized Integration Gateway | Proposed |
-| [0011](./0011-session-tokens.md) | Short-lived JWT + rotating server-side refresh tokens | Proposed |
-| [0012](./0012-provenance-envelope.md) | Provenance envelope as a first-class shared model | Proposed |
-| [0013](./0013-semantic-tiers.md) | Semantic tiers with no auto-promotion | Proposed |
-| [0014](./0014-human-review-attribution.md) | Mandatory human review before attribution | Proposed |
-| [0015](./0015-classification-retention.md) | Data classification & retention model | Proposed |
+| [ADR-001](./001-postgresql.md) | PostgreSQL as production database | Proposed |
+| [ADR-002](./002-identifier-strategy.md) | Identifier strategy (UUIDv7 / ULID / UUIDv5) | Proposed |
+| [ADR-003](./003-evidence-integrity.md) | Evidence integrity (content-addressed WORM + multi-hash + signed manifests) | Proposed |
+| [ADR-004](./004-chain-of-custody.md) | Chain of custody as append-only hash-linked event stream | Proposed |
+| [ADR-005](./005-immutable-audit.md) | Immutable, tamper-evident audit (hash chain + signed WORM anchor) | Proposed |
+| [ADR-006](./006-rbac-abac.md) | RBAC + ABAC + case/tenant isolation | Proposed |
+| [ADR-007](./007-modular-monolith.md) | Modular monolith first | Proposed |
+| [ADR-008](./008-integration-gateway.md) | Single Authorized Integration Gateway | Proposed |
+| [ADR-009](./009-phone-intelligence-model.md) | Phone intelligence model (3 authorized paths + fusion) | Proposed |
+| [ADR-010](./010-geolocation-fusion.md) | Geolocation fusion (3 paths + conflict surfacing) | Proposed |
+| [ADR-011](./011-semantic-evidence-tiers.md) | Semantic evidence tiers, no auto-promotion | Proposed |
+| [ADR-012](./012-data-classification.md) | Data classification model | Proposed |
+| [ADR-013](./013-retention.md) | Retention, legal hold & controlled destruction | Proposed |
+| [ADR-014](./014-air-gapped-deployment.md) | Air-gapped deployment | Proposed |
+| [ADR-015](./015-private-cloud-deployment.md) | Private cloud deployment | Proposed |
 
-> Full skeletons are provided for the five most consequential decisions (0004, 0005, 0006, 0007,
-> 0010). The remainder are listed here with their decision summary in the
-> [Technical Proposal §18](../DILIP-TECHNICAL-PROPOSAL.md#18-adr-list) and will be expanded during
-> review.
+See also the [Technical Proposal §19](../DILIP-TECHNICAL-PROPOSAL.md#19-adr-list).

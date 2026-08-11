@@ -3,44 +3,45 @@
 **Digital Investigation & Linked Intelligence Platform** — Discovery / Architecture phase.
 
 > **Status: Phase 0 (Discovery). No production code.** These documents are a proposal awaiting
-> architecture review and approval. Per the engineering brief, no implementation (code, migrations,
-> Dockerfiles, APIs, schema changes, deployments, real integrations) begins until the architecture
-> is approved.
+> architecture review and approval. Per the master brief, no implementation (code, migrations,
+> Dockerfiles, APIs, real integrations, deployment, infrastructure) begins until Phase 0 is
+> approved. See the **Architecture Readiness Verdict** at the end of the proposal.
 
 ## Contents
 
 | Document | Purpose |
 |---|---|
-| [DILIP-TECHNICAL-PROPOSAL.md](./DILIP-TECHNICAL-PROPOSAL.md) | **Primary deliverable** — the full 20-section Technical Proposal. |
-| [adr/](./adr/) | Architecture Decision Record index and skeletons. |
-| [architecture/threat-model.md](./architecture/threat-model.md) | Standalone threat model (expanded from Proposal §13). |
-| [architecture/data-model.md](./architecture/data-model.md) | Logical data model / ERD (expanded from Proposal §6). |
+| [DILIP-TECHNICAL-PROPOSAL.md](./DILIP-TECHNICAL-PROPOSAL.md) | **Primary deliverable** — the full Technical Proposal (24 sections) incl. readiness verdict. |
+| [adr/](./adr/) | Architecture Decision Records ADR-001…015. |
+| [architecture/threat-model.md](./architecture/threat-model.md) | STRIDE threat model (Impact/Likelihood/Attack-Surface/Mitigation/Residual/Detection/Response). |
+| [architecture/data-model.md](./architecture/data-model.md) | Logical data model, ERD, and Entity Graph. |
 
 ## The governing principle
 
-DILIP is a **Digital Investigation Evidence & Intelligence Platform**, not a tracking tool. A
-tracking link is one collection mechanism inside a larger accountable pipeline:
+DILIP is a **Legal / Compliance-first Digital Investigation & Linked Intelligence Platform**, not a
+tracking tool. Every result travels an accountable pipeline:
 
 ```
-Collection → Provenance → Enrichment → Correlation → Human Review → Evidence → Audit → Report
+Case → Subjects/Entities → Identifiers → Observations → Intelligence → Evidence
+     → Correlation → Analyst Review → Findings → Conclusion → Report
 ```
 
 The semantic ladder is never short-circuited:
 
 ```
-Observed Data → Enriched Data → Correlation → Attribution
+Raw Observation → Normalized → Evidence/Intelligence → Correlation → Review → Finding/Conclusion
 ```
 
-- A tracking link ≠ a phone number.
-- An IP address ≠ a person.
-- A geolocation ≠ a person's location with certainty.
+- Tracking Link ≠ Person · Phone ≠ Person · IP ≠ Person · Location ≠ Person · Device ≠ Person
+- **Confidence ≠ Fact** — no automatic CORRELATION → FACT.
 
-For every result the system must answer: where did it come from, when was it collected, by what
-method, under what authority, who accessed it, has it changed, what is our confidence, how does it
-link to other evidence, and who approved it. If those questions cannot be answered, the data is not
-legal-grade evidence.
+The platform never says *"we found the phone number / the location."* It says *from which source, at
+what time, under which authorization, with what supporting evidence, at what confidence, with which
+conflicts, and by which analyst's reviewed steps.* If those questions cannot be answered, the data is
+not legal-grade evidence.
 
 ## Review
 
-The Technical Proposal is submitted for review. Feedback and approval decisions should be recorded
-against the relevant ADRs before Phase 1 (Foundation) begins.
+The Technical Proposal is submitted for review. The current **Architecture Readiness Verdict** is
+**NOT READY — OPEN QUESTIONS REMAIN**; six blocking questions are listed in §23–§24. Resolve those,
+record approval against the relevant ADRs, and Phase 1 (Security Foundation) may begin.

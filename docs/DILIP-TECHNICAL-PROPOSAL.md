@@ -1,22 +1,23 @@
 # DILIP — Technical Proposal
 
 **Digital Investigation & Linked Intelligence Platform**
-**Enterprise Architecture — Discovery Phase Deliverable**
+**Enterprise Architecture — Discovery Phase (Phase 0) Deliverable**
 
 | | |
 |---|---|
-| **Document type** | Technical Proposal (Phase 0 — Discovery) |
-| **Status** | DRAFT — awaiting architecture review & approval |
-| **Version** | 0.1.0 |
+| **Document type** | Technical Proposal (Phase 0 — Discovery & Architecture Review) |
+| **Status** | DRAFT — awaiting architecture approval before Phase 1 |
+| **Version** | 0.2.0 |
 | **Date** | 2026-08-11 |
-| **Prepared by** | Principal Software Architect / Digital Forensics Platform Engineer / Security Architect |
-| **Scope** | Architecture, threat model, data model, security model. **No production code.** |
+| **Prepared by** | Principal Security Architect / Digital Forensics Architect / Enterprise Investigation Systems Engineer |
+| **Scope** | Architecture, threat model, data model, evidence/audit/security model, ADRs. **No production code.** |
+| **Supersedes** | v0.1.0 (aligned to the expanded master brief: tenancy, entity graph, phone/geo fusion, compliance model, supply-chain security, 15 ADRs, readiness verdict) |
 
-> **Approval gate.** This document is a *proposal*, not an implementation. Per the brief, no
-> production code, migrations, Dockerfiles, APIs, schema changes, deployments, or real external
-> integrations are to be produced until this architecture is reviewed and approved. Every place
-> where information was not supplied is flagged as **ASSUMPTION** or **OPEN QUESTION** rather than
-> guessed.
+> **Approval gate (mandatory).** This is a *proposal*, not an implementation. Per the master brief
+> (§2, §38, §40) no production code, migrations, Dockerfiles, APIs, real integrations, real data
+> collection, deployment, or infrastructure changes are produced until this architecture is
+> reviewed and approved. Phase 1 must not begin before Phase 0 is approved. Where the brief did not
+> supply information, it is recorded under **OPEN QUESTION** — never guessed.
 
 ---
 
@@ -27,21 +28,25 @@
 3. [Requirements Decomposition](#3-requirements-decomposition)
 4. [Target Architecture](#4-target-architecture)
 5. [Module Boundaries](#5-module-boundaries)
-6. [Database Schema](#6-database-schema)
-7. [Security Architecture](#7-security-architecture)
-8. [Evidence Architecture](#8-evidence-architecture)
-9. [Audit Architecture](#9-audit-architecture)
-10. [Intelligence Architecture](#10-intelligence-architecture)
-11. [Phone Identity Correlation Architecture](#11-phone-identity-correlation-architecture)
-12. [Geolocation Architecture](#12-geolocation-architecture)
-13. [Threat Model](#13-threat-model)
-14. [Data Classification & Retention](#14-data-classification--retention)
-15. [Deployment Architecture](#15-deployment-architecture)
-16. [Testing Strategy](#16-testing-strategy)
-17. [Prototype Migration Plan](#17-prototype-migration-plan)
-18. [ADR List](#18-adr-list)
-19. [Implementation Roadmap](#19-implementation-roadmap)
-20. [Open Questions & Assumptions](#20-open-questions--assumptions)
+6. [Data Model (Logical ERD)](#6-data-model-logical-erd)
+7. [Evidence Architecture](#7-evidence-architecture)
+8. [Chain of Custody Architecture](#8-chain-of-custody-architecture)
+9. [Immutable Audit Architecture](#9-immutable-audit-architecture)
+10. [Phone Intelligence Architecture](#10-phone-intelligence-architecture)
+11. [Geolocation Architecture](#11-geolocation-architecture)
+12. [Intelligence, Correlation & Entity Graph](#12-intelligence-correlation--entity-graph)
+13. [Security Architecture](#13-security-architecture)
+14. [Threat Model](#14-threat-model)
+15. [Air-Gapped Deployment](#15-air-gapped-deployment)
+16. [Private Cloud Deployment](#16-private-cloud-deployment)
+17. [Testing Strategy](#17-testing-strategy)
+18. [Prototype Migration Matrix](#18-prototype-migration-matrix)
+19. [ADR List](#19-adr-list)
+20. [Risk-Ordered Implementation Roadmap](#20-risk-ordered-implementation-roadmap)
+21. [Legal / Compliance Model](#21-legal--compliance-model)
+22. [Data Classification, Retention & Destruction](#22-data-classification-retention--destruction)
+23. [Open Questions](#23-open-questions)
+24. [Architecture Readiness Verdict](#24-architecture-readiness-verdict)
 
 ---
 
@@ -49,1183 +54,912 @@
 
 ### 1.1 What DILIP is
 
-DILIP is a **Digital Investigation Evidence & Intelligence Platform**, not a tracking-link tool.
-A tracking link is one *collection mechanism* inside a much larger pipeline whose real product is
-**legally-defensible, auditable investigative evidence**. The platform's job is to move data along
-a controlled path where every step is accountable:
+DILIP is a **Legal / Compliance-first Digital Investigation & Linked Intelligence Platform**. It is
+not a tracking service and not a data-collection dashboard. Its purpose is to link evidence, data,
+and disparate sources inside a unified **Case** while preserving evidence integrity, source,
+context, chain of custody, and a defensible level of confidence in every conclusion.
+
+The investigative pipeline is a controlled, accountable chain:
 
 ```
-Investigation / Case
-   → Investigative Action
-      → Authorized Collection
-         → Telemetry / Intelligence
-            → Enrichment
-               → Correlation
-                  → Human Review
-                     → Evidence
-                        → Chain of Custody
-                           → Audit
-                              → Legal / Technical Report
+Case → Subjects/Entities → Identifiers → Tracking/Observations → External Intelligence
+     → Evidence → Correlation → Analyst Review → Findings → Conclusion → Legal Report
 ```
 
-### 1.2 The governing principle
+### 1.2 The governing rule (the most important rule in the project)
 
-The system must **never** silently promote observed telemetry into a statement of identity.
-It enforces a strict semantic ladder and preserves the boundary between each rung:
+The platform must **never** state *"we found the phone number / the person / the location."* It must
+state:
+
+> *"This identifier was obtained from source X, at time Y, under authorization Z; its provenance is
+> preserved; the following evidence supports its association with entity A; confidence is B; there
+> is / is not conflicting evidence; and these are the steps the analyst took to reach the
+> conclusion."*
+
+The same discipline applies to location: not *"the subject is at place X"* but *"there are three
+geolocation observations from different sources, each with accuracy/confidence/provenance; they
+agree / conflict; the analyst reviewed them."*
+
+Consequently these equivalences are **forbidden** and are prevented structurally, not just in the UI:
 
 ```
-Observed Data  →  Enriched Data  →  Correlation  →  Attribution
+Tracking Link ≠ Person   Phone ≠ Person   IP ≠ Person   Location ≠ Person   Device ≠ Person
 ```
 
-Three non-negotiable truths are baked into the data model, not just the UI:
+All of these are **evidence / observations / intelligence signals** requiring correlation and human
+attribution.
 
-- **A tracking link ≠ a phone number.**
-- **An IP address ≠ a person.**
-- **A geolocation ≠ a person's location with certainty.**
+### 1.3 The semantic ladder (never short-circuited)
 
-Any attribution is the *output of a documented, authorized correlation* carrying source, collection
-time, providing authority, and a confidence score — never an inference presented as a fact.
+```
+Raw Observation → Normalized Observation → Evidence/Intelligence → Correlation → Analyst Review → Finding/Conclusion
+```
 
-### 1.3 Every result must be answerable
+Every stored claim carries a **semantic tier** — FACT / INTELLIGENCE / CORRELATION / CONCLUSION —
+and the system **never auto-promotes** a lower tier to a higher one. `CORRELATION → FACT` requires an
+audited human decision.
 
-For **every** data point the platform holds, an investigator, supervisor, auditor, or court must be
-able to answer, from the record itself:
+### 1.4 The nine questions every datum must answer
+
+For **any** result the platform holds, these must be answerable from the record itself:
 
 > Where did it come from? When was it collected? By what method? Under what authority? Who accessed
-> it? Has it changed? What is our confidence in it? How does it link to other evidence? Who
-> approved it?
+> it? Has it changed? What is our confidence? How does it link to other evidence? Who approved it?
 
-If those questions cannot be answered, the data is **not legal-grade evidence**, however polished
-the interface is. This requirement drives the provenance, custody, and audit architecture below.
+If they cannot be answered, the data is **not legal-grade evidence** — no matter how polished the
+interface. This drives the provenance, custody, and audit architecture throughout.
 
-### 1.4 What we are proposing
+### 1.5 What we propose
 
-- Evolve the single-file FastAPI + SQLite + CDN-React prototype into a **modular monolith**
-  (FastAPI backend, separately-built React frontend, PostgreSQL) with clearly bounded modules that
-  can later be extracted into services.
-- Treat **provenance, confidence, evidence integrity, chain of custody, and append-only audit** as
-  first-class, cross-cutting concerns present from Phase 1 — not features bolted on later.
-- Place **all sensitive external contact behind a single Authorized Integration Gateway** with
-  authentication, purpose binding, data minimization, and full request/response logging.
-- Design for **air-gapped** and **private-cloud** deployment: no CDNs, no external fonts/JS, all
-  dependencies vendored and version-pinned.
-- Enforce **legal/authorization boundaries** structurally: collection requires a purpose + an
-  authorization reference; sensitive correlation requires supervisor review before it becomes
-  attribution.
+- Evolve the single-file FastAPI + SQLite + CDN-React prototype into a **modular monolith** (FastAPI
+  backend, separate React/Vite frontend, PostgreSQL) with strong module boundaries permitting later
+  service extraction.
+- Make **provenance, confidence, evidence integrity, chain of custody, tamper-evident audit,
+  semantic tiers, and human review** first-class from Phase 1 — never retrofitted.
+- Enforce **case isolation and tenant isolation**: an investigator on Case A never automatically
+  reaches Case B; RBAC is layered with case-level + attribute/classification-based checks (ABAC).
+- Route **all** sensitive external contact through a single **Authorized Integration Gateway**
+  (authN, authZ, mTLS, purpose binding, data minimization, provenance, logging, failure isolation).
+  DILIP is a *consumer* of authorized results — never an interception or intrusion tool.
+- Support **air-gapped** and **private-cloud** deployment; no CDNs/external JS/fonts; all
+  dependencies vendored, pinned, and accompanied by an **SBOM** with signed artifacts.
+- Provide a **Compliance abstraction** (informed by ISO/IEC 27037 principles) without asserting
+  court-admissibility from the mere presence of a hash.
 
-### 1.5 What DILIP explicitly is *not* and will not become
+### 1.6 What DILIP explicitly is not (§37)
 
-- Not a lawful-interception platform, not an SS7/signaling exploitation tool, not a telecom
-  intrusion system. It **receives** authorized results from approved systems through a gateway; it
-  does not intercept, hack, or exfiltrate.
-- Not a mechanism to extract IMEI, SIM data, MSISDN, or precise GPS from a plain HTTP request. Such
-  data, when lawfully available, arrives only through an explicit authorized integration.
-- Not an open redirector; tracking endpoints are hardened against SSRF and open-redirect abuse.
+Not an unauthorized-surveillance platform, telecom/signaling interception tool, hacking or
+credential-theft platform, malware platform, open-redirect service, or arbitrary location tracker.
+All telecom/signaling/identity/location intelligence enters only through authorized external systems
+under proper authorization.
 
 ---
 
 ## 2. Current State Assessment
 
-### 2.1 What the prototype is (as described in the brief)
+> **The prototype source is NOT present in this repository** (the repository was empty at the start
+> of this engagement). Per §2 and §40 of the brief, no Current-State findings are invented. The
+> description below is what the brief *states*; each claim is marked for verification against actual
+> source once provided.
 
-> **Note.** The prototype source is **not present in this repository** (the repo was empty at the
-> start of this engagement). This assessment is therefore based on the description in the brief. A
-> line-by-line audit of the actual prototype file is a **Phase 0 follow-up task** — see Open
-> Questions. Treat the "current behaviour" claims below as *stated*, to be verified against source.
+| Aspect | Stated in brief | To verify |
+|---|---|---|
+| Packaging | Single Python file (backend + frontend) | ✔ audit source |
+| API | FastAPI | ✔ |
+| Persistence | SQLite | ✔ |
+| Frontend | React SPA inside a Python string | ✔ |
+| Styling | Tailwind via CDN | ✔ |
+| Telemetry | Synthetic/demo | ✔ |
+| Correlation | Mock | ✔ |
+| RBAC / case isolation | Unstated → assume minimal/absent | **OPEN QUESTION** |
+| Evidence integrity / custody | Unstated → assume absent | **OPEN QUESTION** |
+| Audit | Unstated → assume plain table or absent | **OPEN QUESTION** |
 
-The prototype is a **proof-of-concept**, explicitly *not* production-ready:
+**What it proves:** the workflow shape (case → collection → telemetry → correlation → evidence →
+report) and the tracking-link + dashboard interaction model.
 
-| Aspect | Prototype reality |
-|---|---|
-| Packaging | A **single Python file** containing backend + frontend |
-| API | **FastAPI** |
-| Persistence | **SQLite** |
-| Frontend | **React SPA** embedded inside a Python string |
-| Styling | **Tailwind via CDN** |
-| Telemetry | **Synthetic / demo** data |
-| Correlation | **Mock** data |
-| Identity/RBAC | Presumed minimal or absent (**OPEN QUESTION**) |
-| Evidence integrity | Presumed absent (**OPEN QUESTION**) |
-| Audit | Presumed a plain table or absent (**OPEN QUESTION**) |
-
-### 2.2 What the prototype proves
-
-- The **concept** and the **workflow shape** (case → action → collection → telemetry → correlation →
-  evidence → report) are validated.
-- A tracking/telemetry endpoint plus a dashboard is a viable interaction model.
-
-### 2.3 What the prototype cannot do (the gap to close)
-
-- **No trust boundary** between collection, enrichment, correlation, and attribution — the core
-  principle of the platform is not enforced.
-- **No evidence integrity**: no content-addressed storage, hashing discipline, or tamper-evidence.
-- **No chain of custody** as an event stream.
-- **No append-only / tamper-evident audit**.
-- **No real RBAC / case-level / resource-level authorization**.
-- **SQLite** is single-writer, weak on concurrency, integrity constraints, encryption-at-rest, and
-  point-in-time recovery — unsuitable for legal-grade multi-user evidence handling.
-- **CDN dependencies** (Tailwind, likely React) break air-gapped operation and pin trust to third
-  parties.
-- **Frontend-in-a-Python-string** cannot be linted, tested, type-checked, or built reproducibly.
-- **Open-redirect / SSRF** posture of the tracking endpoint is unverified and likely unsafe.
-- **Mock correlation** presents inferences without provenance or confidence — the opposite of the
-  required semantics.
-
-The migration disposition for each of these is in [§17](#17-prototype-migration-plan).
+**What it cannot do (the gap):** no trust boundary between observation/intelligence/correlation/
+attribution; no evidence integrity or custody stream; no tamper-evident audit; no real RBAC/ABAC or
+case/tenant isolation; SQLite's concurrency/integrity/encryption/PITR limits; CDN dependencies break
+air-gap; frontend-in-a-string is untestable; open-redirect/SSRF posture unverified; mock correlation
+presents inferences without provenance/confidence. Dispositions are in [§18](#18-prototype-migration-matrix).
 
 ---
 
 ## 3. Requirements Decomposition
 
-Each requirement from the brief is decomposed into **Functional (FR)**, **Non-Functional (NFR)**,
-**Security (SEC)**, and **Compliance (COMP)** requirements. IDs are stable and referenced elsewhere.
+Requirements are grouped as **Functional (FR)**, **Non-Functional (NFR)**, **Security (SEC)**,
+**Compliance (COMP)**, **Evidence (EVID)**, and **Intelligence (INT)**, each with stable IDs
+referenced across the document.
 
-### 3.1 Case Management
+### 3.1 Functional (FR)
 
-| ID | Type | Requirement |
-|---|---|---|
-| FR-CASE-1 | Functional | Support full case lifecycle: DRAFT → OPEN → ACTIVE → UNDER_REVIEW → SUSPENDED → CLOSED → ARCHIVED, with a defined, enforced transition graph. |
-| FR-CASE-2 | Functional | Each case carries: deterministic Case ID, case number, title, description, classification, priority, status, assigned investigator, supervising officer, creation timestamp, last activity, legal/authorization reference, retention policy, legal-hold status, related subjects/events/evidence/reports. |
-| SEC-CASE-1 | Security | Every lifecycle transition is authorized, audited, timestamped, attributed to a user, and (where required) carries a reason. |
-| COMP-CASE-1 | Compliance | A case cannot be created without a legal/authorization reference where policy requires one; retention policy is set at creation. |
-| NFR-CASE-1 | Non-functional | Lifecycle transitions are atomic and consistent under concurrency. |
+| ID | Requirement |
+|---|---|
+| FR-1 | Create and manage full Investigation Cases across the lifecycle DRAFT → OPEN → ACTIVE → UNDER_REVIEW → SUSPENDED → CLOSED → ARCHIVED. |
+| FR-2 | Model Subjects/Entities, Identifiers, Observations, Evidence, Correlations, Findings, Conclusions, and Reports within a Case. |
+| FR-3 | Create authorized tracking/investigation links bound to case, objective, campaign/link ID, destination, expiration, status, authorization. |
+| FR-4 | Ingest tracking telemetry and normalize it through the semantic ladder (raw → normalized → evidence/intelligence). |
+| FR-5 | Support three independent phone-intelligence paths (authorized call records; authorized OSINT; authorized telecom/signaling) plus a fusion layer. |
+| FR-6 | Support three independent geolocation paths (IP; Wi-Fi/BSSID; cell/tower) plus a fusion layer that surfaces conflicts. |
+| FR-7 | Provide an Entity Graph (nodes + typed relationships with confidence + provenance) and a Correlation Engine producing *candidate* relationships for human review. |
+| FR-8 | Produce re-verifiable, versioned Investigation Reports containing evidence hashes, custody, correlations, conflicts, findings, analyst attribution, confidence, conclusions, audit references. |
+| FR-9 | Provide dashboards: case overview, timeline, event/observation explorer, entity/intelligence graph, correlation workspace, evidence vault, custody viewer, audit viewer, reports, access management, system health. |
 
-### 3.2 Identifiers
+### 3.2 Non-Functional (NFR)
 
-| ID | Type | Requirement |
-|---|---|---|
-| NFR-ID-1 | Non-functional | IDs are stable, collision-resistant, database-safe, globally unique, and reproducible where required. |
-| SEC-ID-1 | Security | `hash()` and other non-cryptographic, process-seeded, or unstable ID mechanisms are prohibited. |
-| FR-ID-1 | Functional | Human-facing case numbers are separate from internal primary keys. |
+| ID | Requirement |
+|---|---|
+| NFR-1 | Identifiers are stable, collision-resistant, DB-safe, globally unique, reproducible where required; `hash()` and process-seeded schemes are prohibited. |
+| NFR-2 | Air-gapped operation: no CDN/external JS/fonts/APIs except via the approved gateway; deps vendored, mirrored, version-pinned; offline package repo. |
+| NFR-3 | Private-cloud operation: private networking, internal LB, private PostgreSQL/object storage, internal IdP, secrets manager, centralized logging, backup/DR. |
+| NFR-4 | Reliability: backups + PITR + evidence/audit backup + DR with **tested restore**, defined RTO/RPO, health checks, structured logging, metrics, alerting, failure isolation. |
+| NFR-5 | Performance/scale to be sized against confirmed investigator count, case/evidence/telemetry volumes (Open Questions). |
+| NFR-6 | Explainability: every correlation and conclusion is reconstructable ("why were these linked?"). |
 
-### 3.3 Authorization & Access Control
+### 3.3 Security (SEC)
 
-| ID | Type | Requirement |
-|---|---|---|
-| SEC-AUTHZ-1 | Security | Roles: Investigator, Supervisor, Auditor, Evidence Viewer, each with the capabilities defined in the brief. |
-| SEC-AUTHZ-2 | Security | Auditors can read audit/evidence-access history but **cannot modify evidence**. Evidence Viewer is read-only. |
-| SEC-AUTHZ-3 | Security | Combine RBAC with case-level, resource-level, need-to-know, and legal-authorization-boundary checks. |
-| SEC-AUTHZ-4 | Security | Sensitive actions (e.g. authorized correlation, telecom integration calls) require supervisor approval. |
+| ID | Requirement |
+|---|---|
+| SEC-1 | Zero-Trust principles; strong authentication; MFA; least privilege. |
+| SEC-2 | RBAC **plus** case-level authorization **plus** classification/attribute-based restrictions (ABAC). Investigator on Case A cannot access Case B by default. |
+| SEC-3 | Tenant/organization isolation where multi-tenant. |
+| SEC-4 | Encryption at rest and in transit; mTLS on sensitive boundaries; secrets & key management (no secrets in source). |
+| SEC-5 | Secure session management; token revocation; secure logging with redaction. |
+| SEC-6 | SSRF protection and open-redirect prevention on tracking destinations; input validation; security headers; rate limiting. |
+| SEC-7 | Supply-chain security: dependency management, vulnerability scanning, **SBOM**, signed artifacts. |
+| SEC-8 | All external intelligence enters only via the Authorized Integration Gateway; no external system reaches the core DB. |
 
-### 3.4 Tracking Links & Collection
+### 3.4 Compliance (COMP)
 
-| ID | Type | Requirement |
-|---|---|---|
-| FR-TRK-1 | Functional | Create authorized tracking/telemetry links tied to a case, action, purpose, and authorization. |
-| FR-TRK-2 | Functional | On visit, collect only browser-legitimate telemetry (timestamp, source IP, User-Agent, browser, OS, device class, language, timezone, screen dimensions, request metadata) subject to deployment/authorization. |
-| SEC-TRK-1 | Security | Never assume IMEI, MSISDN, GPS, SIM info, or private device identifiers are obtainable from an HTTP request. |
-| SEC-TRK-2 | Security | Destination URLs must pass scheme validation, HTTPS enforcement, domain allowlist, SSRF protection, private-IP/localhost blocking, DNS-rebinding consideration, redirect-chain policy, and URL normalization before use. The tracking endpoint must not become an open redirect. |
-| COMP-TRK-1 | Compliance | Every collection is bound to purpose + authorization + data type + retention + access policy (data minimization). |
+| ID | Requirement |
+|---|---|
+| COMP-1 | Compliance abstraction that binds later to the actual governing legal/regulatory regime (not assumed). |
+| COMP-2 | Handling informed by ISO/IEC 27037-style digital-evidence principles: identification, collection, acquisition, preservation. |
+| COMP-3 | Data classification (PUBLIC…HIGHLY_RESTRICTED) governing access, encryption, export, retention, audit, reporting. |
+| COMP-4 | Retention policies, case-specific retention, legal hold, controlled destruction with destruction evidence; no ad-hoc delete of evidence. |
+| COMP-5 | Every collection bound to purpose + authorization + data type + retention + access policy (data minimization). |
+| COMP-6 | No claim of court-admissibility from a hash alone; admissibility depends on jurisdiction, procedure, authorization, and the full collection process. |
 
-### 3.5 Data Gathering & Intelligence
+### 3.5 Evidence (EVID)
 
-| ID | Type | Requirement |
-|---|---|---|
-| FR-INT-1 | Functional | Data Gathering Engine is built as pluggable collection/enrichment **adapters**: Collection → Normalizer → Validation → Provenance → Enrichment → Correlation. |
-| FR-INT-2 | Functional | Intelligence layer is modular: IP, ASN, Geo, OSINT, Device, Network, Identity Correlation, Entity Resolution, Risk Scoring, Timeline. |
-| SEC-INT-1 | Security | Every source datum carries source, collection method, timestamp, authorization context, confidence, provenance, data classification, retention. |
-| FR-INT-3 | Functional | Every intelligence result is an *observation* (observation + source + timestamp + confidence + provenance + analyst review), never an unqualified fact. |
+| ID | Requirement |
+|---|---|
+| EVID-1 | Encrypted Evidence Vault: at-rest & in-transit encryption, content hashing (SHA-256 minimum, SHA-512+ optional), content-addressed storage, WORM-compatible, signed manifests, full metadata + provenance. |
+| EVID-2 | Originals immutable after ingestion; any content change is detectably surfaced. |
+| EVID-3 | Full chain of custody as an append-only event stream recording who/what/when/why/from/to/authorization/previous-hash/new-hash; fully reconstructable. |
+| EVID-4 | Evidence integrity is *provable*: the displayed artifact is byte-identical to the collected one. |
+| EVID-5 | Reports are re-verifiable against the evidence they cite. |
 
-### 3.6 Correlation
+### 3.6 Intelligence (INT)
 
-| ID | Type | Requirement |
-|---|---|---|
-| FR-COR-1 | Functional | Correlation never produces `IP → Person` directly. It produces candidate matches with evidence weighting, confidence, and a required human-review step. |
-| FR-COR-2 | Functional | The system can *explain* every correlation ("why were these two entities linked?") with the contributing observations. |
-| SEC-COR-1 | Security | Sensitive correlations require supervisor review before becoming attribution. |
-
-### 3.7 Phone / Subscriber Identity Correlation
-
-| ID | Type | Requirement |
-|---|---|---|
-| FR-PHONE-1 | Functional | Support three **separate** authorized adapters: (1) authorized call/contact records, (2) public OSINT, (3) authorized telecom/network integration. |
-| SEC-PHONE-1 | Security | No mechanism for unauthorized access to communications records. DILIP never becomes an interception/intrusion platform. |
-| COMP-PHONE-1 | Compliance | Each path records source, timestamp, reference ID, matching attributes, confidence, authorization reference, reviewer, correlation timestamp. |
-| FR-PHONE-2 | Functional | Each path documents what *can* and *cannot* be concluded from it. OSINT alone is never conclusive proof of identity. |
-
-### 3.8 Geolocation
-
-| ID | Type | Requirement |
-|---|---|---|
-| FR-GEO-1 | Functional | Support IP geolocation, Wi-Fi/BSSID intelligence, and cell/network location as separate, non-conflated sources. |
-| FR-GEO-2 | Functional | A **Location Fusion** layer weights sources, detects conflicts, computes confidence, and **surfaces disagreement** (never hides it) with per-source explanation. |
-| SEC-GEO-1 | Security | IP geo is treated as approximate, not GPS. BSSID/cell data must come from an authorized source; never assume a browser exposes them. |
-| FR-GEO-3 | Functional | Location is never presented as precise coordinates when the source does not support that precision; approximation radius/accuracy is stored. |
-
-### 3.9 Evidence, Custody, Integrity
-
-| ID | Type | Requirement |
-|---|---|---|
-| FR-EVID-1 | Functional | Evidence Vault stores artifacts with full metadata (ID, case, type, filename, MIME, size, SHA-256, optional stronger hash, collection time, collector, source, acquisition method, authorization ref, storage location, classification, retention, legal hold, status). |
-| SEC-EVID-1 | Security | Originals are immutable after ingestion (WORM semantics). |
-| FR-CUST-1 | Functional | Chain of custody is an **event stream** (not a string); the full custody history is reconstructable. |
-| SEC-EVID-2 | Security | Integrity is *provable*: content-addressed storage, hash verification, signed manifests, timestamping — able to prove the displayed artifact is byte-identical to the collected one. |
-
-### 3.10 Audit
-
-| ID | Type | Requirement |
-|---|---|---|
-| SEC-AUD-1 | Security | Audit log is append-only, tamper-evident via cryptographic hash chaining, and backed by immutable/WORM storage. |
-| SEC-AUD-2 | Security | A `VERIFY AUDIT INTEGRITY → PASS/FAIL` operation exists and is testable. |
-| COMP-AUD-1 | Compliance | Every security-relevant action produces an audit event with actor, role, timestamp, action, before/after state, reason, session/IP context. |
-
-### 3.11 Integration Gateway
-
-| ID | Type | Requirement |
-|---|---|---|
-| SEC-GW-1 | Security | All sensitive external contact routes through a single Authorized Integration Gateway; no ad-hoc external calls scattered in modules. |
-| SEC-GW-2 | Security | Each integration has authentication, authorization, schema validation, request/response logging, timeout, retry, rate limiting, data minimization, classification, provenance, failure isolation. |
-| SEC-GW-3 | Security | Integrations cannot directly access the full DILIP database. |
-| SEC-GW-4 | Security | mTLS and purpose binding where appropriate; legal authorization reference on every request. |
-
-### 3.12 Security, Deployment, Reliability
-
-| ID | Type | Requirement |
-|---|---|---|
-| SEC-ENC-1 | Security | Encryption at rest (DB, evidence, backups, secrets, sensitive config) and in transit (TLS, mTLS where needed). |
-| SEC-IDN-1 | Security | Strong authentication; JWT/session architecture with refresh/revocation; MFA-ready. |
-| SEC-SEC-1 | Security | No secrets in source. Env-based secrets in dev; secret manager/KMS in production. |
-| NFR-DEP-1 | Non-functional | Runs air-gapped (all deps vendored, mirrored, version-pinned; no CDN/external JS/fonts/APIs except through the approved boundary) and in private cloud (private PostgreSQL, object storage, DNS, IdP, registry, network segmentation). |
-| NFR-REL-1 | Non-functional | Backups + point-in-time recovery + evidence backup + DR with *tested restore*, defined RTO/RPO, health checks, structured logging, metrics, alerting, failure isolation. |
-
-### 3.13 Data Governance
-
-| ID | Type | Requirement |
-|---|---|---|
-| COMP-CLASS-1 | Compliance | Classification model: PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED, HIGHLY_RESTRICTED; every data object knows its classification. |
-| COMP-MIN-1 | Compliance | Data minimization: no collection without purpose + authorization + type + retention + access policy. |
-| COMP-RET-1 | Compliance | Retention policies and legal holds are enforced; legal hold overrides deletion. |
-| FR-SEM-1 | Functional | The system distinguishes FACT vs INTELLIGENCE vs CORRELATION vs ANALYST CONCLUSION and never auto-promotes inference to fact. |
-
-### 3.14 Reporting & Frontend
-
-| ID | Type | Requirement |
-|---|---|---|
-| FR-REP-1 | Functional | Professional, **versioned** reports containing case metadata, timeline, actions, intelligence observations, correlation results, evidence references + hashes, chain of custody, audit summary, analyst conclusions, confidence levels, data sources, limitations, authorization references. |
-| FR-UI-1 | Functional | Separate `frontend/` and `backend/`; local build pipeline; no CDN. Dashboard: case overview, timeline, event explorer, intelligence graph, correlation workspace, evidence vault, custody viewer, audit viewer, reports, user/access management, system health. |
+| ID | Requirement |
+|---|---|
+| INT-1 | Every intelligence datum carries source, timestamp, collection method, authorization context, confidence, provenance, semantic tier. |
+| INT-2 | OSINT results are stored as INTELLIGENCE, never auto-promoted to FACT; promotion requires sufficient evidence + human review. |
+| INT-3 | The Correlation Engine is logically separate from the Evidence Store and never writes conclusions directly; it emits candidate relationships + confidence for analyst review. |
+| INT-4 | Confidence ≠ Fact: no automatic CORRELATION → FACT transition without human attribution. |
+| INT-5 | Conflicting intelligence/geolocation is never hidden; conflicts are surfaced and preserved with per-source provenance. |
+| INT-6 | Conclusions are explainable, evidence-backed, attributable to a named analyst, and audited. |
 
 ---
 
 ## 4. Target Architecture
 
-### 4.1 Architectural style
+### 4.1 Style — Modular Monolith first (ADR-007)
 
-**Modular monolith first.** A single deployable backend with strong internal module boundaries,
-each module owning its domain, service layer, repository, API surface, and tests. Boundaries are
-drawn so any module (e.g. Integrations, Intelligence) can be extracted into a separate service
-later without a rewrite. We reject premature microservices: they would multiply the security
-surface, the audit-consistency problem, and operational cost before the domain is stable.
+One deployable backend, strong internal module boundaries, each module owning its domain, services,
+repository, API surface, and tests. Boundaries are drawn so a module (e.g. Integration Gateway,
+Intelligence) can be extracted to a service later *if a real need appears*. Premature microservices
+are rejected: they would multiply the security surface, the audit-consistency problem, and
+operational cost before the domain stabilizes.
 
-See **ADR-0001** (modular monolith) and **ADR-0002** (module boundary rules).
-
-### 4.2 High-level component view
+### 4.2 Component view
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                     React Frontend (built, no CDN)             │
-│  Case UI · Timeline · Event Explorer · Intel Graph ·          │
-│  Correlation Workspace · Evidence Vault · Custody · Audit ·   │
-│  Reports · Access Mgmt · System Health                        │
-└───────────────────────────────┬──────────────────────────────┘
-                                 │  HTTPS (mTLS optional), JWT/session
+┌───────────────────────────────────────────────────────────────────────┐
+│         React Frontend (Vite build, self-hosted, no CDN)               │
+│  Case · Timeline · Observation Explorer · Entity/Intel Graph ·         │
+│  Correlation Workspace · Evidence Vault · Custody · Audit ·            │
+│  Reports · Access Mgmt · System Health                                 │
+└───────────────────────────────┬───────────────────────────────────────┘
+                                 │  HTTPS (mTLS optional), MFA, session tokens
                                  ▼
-┌──────────────────────────────────────────────────────────────┐
-│                     API Layer (FastAPI)                        │
-│  AuthN · AuthZ (RBAC + case/resource/need-to-know) ·          │
-│  Input validation · Rate limiting · Structured request log     │
-└───────────────────────────────┬──────────────────────────────┘
-                                 │  in-process module calls (typed)
-        ┌────────────┬───────────┼───────────┬───────────┬─────────────┐
-        ▼            ▼           ▼           ▼           ▼             ▼
-   ┌────────┐  ┌──────────┐ ┌─────────┐ ┌──────────┐ ┌─────────┐ ┌───────────┐
-   │identity│  │  cases   │ │collect. │ │intellig. │ │correlat.│ │ evidence  │
-   └────────┘  └──────────┘ └─────────┘ └──────────┘ └─────────┘ └───────────┘
-        │            │           │           │           │             │
-        └──────┬─────┴─────┬─────┴─────┬─────┴─────┬─────┴──────┬──────┘
-               ▼           ▼           ▼           ▼            ▼
-          ┌────────┐  ┌─────────┐            ┌───────────┐  ┌──────────────┐
-          │ audit  │  │reporting│            │integrations│ │  telemetry   │
-          └────────┘  └─────────┘            └─────┬──────┘ └──────────────┘
-               │                                    │
-   ┌───────────┼────────────────────────────────┐  │
-   ▼           ▼                                 ▼  ▼
-┌──────────────────┐  ┌────────────────┐  ┌────────────────────────────┐
-│   PostgreSQL     │  │ Evidence Store  │  │ Authorized Integration      │
-│ (relational,     │  │ (content-       │  │ Gateway (single egress      │
-│  encrypted)      │  │  addressed,     │  │ boundary: authN, mTLS,      │
-│                  │  │  WORM)          │  │ purpose binding, logging)   │
-└──────────────────┘  └────────────────┘  └────────────┬───────────────┘
-        │                                               ▼
-┌──────────────────┐                        ┌────────────────────────────┐
-│  Audit Store     │                        │  Approved External Systems  │
-│ (append-only,    │                        │  (telecom/network, OSINT,   │
-│  hash-chained,   │                        │  IP-intel, Wi-Fi/cell —     │
-│  WORM)           │                        │  each behind authorization) │
-└──────────────────┘                        └────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────┐
+│                         API Layer (FastAPI)                            │
+│  AuthN(MFA) · Policy Decision Point [RBAC+Case+ABAC+Tenant+Legal] ·    │
+│  Input validation · Rate limiting · SSRF/redirect guard · Sec headers  │
+└───────────────────────────────┬───────────────────────────────────────┘
+                                 │  typed in-process module calls
+   ┌──────────┬───────────┬──────┴────┬───────────┬───────────┬──────────┐
+   ▼          ▼           ▼           ▼           ▼           ▼          ▼
+identity   cases    tracking/    intelligence  correlation  geolocation phone-
+& access          telemetry     & entity graph            intelligence intel
+   │          │           │           │           │           │          │
+   └────┬─────┴─────┬─────┴─────┬─────┴─────┬─────┴─────┬─────┴────┬─────┘
+        ▼           ▼           ▼           ▼           ▼          ▼
+     evidence     audit     reporting    compliance   integration gateway
+        │           │           │            │              │
+   ┌────┴───────────┴───────────┴────────────┴───────┐      ▼
+   ▼                                                  ▼   ┌────────────────────────┐
+┌──────────────┐  ┌────────────────┐  ┌──────────────┐   │ Authorized External     │
+│ PostgreSQL   │  │ Evidence Store │  │ Audit Store  │   │ Systems (telecom, OSINT,│
+│ (encrypted,  │  │ (content-addr, │  │ (append-only │   │ IP-geo, Wi-Fi, cell) —  │
+│  PITR)       │  │  WORM)         │  │  hash chain, │   │ each behind authZ+mTLS  │
+│              │  │                │  │  WORM anchor)│   └────────────┬───────────┘
+└──────────────┘  └────────────────┘  └──────────────┘                │
+        ▲                                                              │
+        └──────────────── gateway is the ONLY egress ─────────────────┘
 ```
-
-> The diagram in the brief (§28) is honored as a **study baseline**, not a final commitment; the
-> above refines it by making the audit store and evidence store explicit peers of the relational DB
-> and by collapsing all external contact into the single gateway.
 
 ### 4.3 Cross-cutting concerns (present from Phase 1)
 
-- **Provenance envelope**: every externally-sourced datum is wrapped with source, method, time,
-  authorization, classification, confidence, retention — enforced at the repository layer.
-- **Semantic tier tagging**: every stored claim is tagged FACT / INTELLIGENCE / CORRELATION /
-  CONCLUSION (see [§10.5](#105-fact-vs-intelligence-vs-conclusion)).
-- **Audit interceptor**: security-relevant service methods emit audit events transactionally.
-- **AuthZ decision point**: a single policy engine consulted by every module (RBAC + case +
-  resource + need-to-know + legal boundary).
+- **Provenance envelope** on every externally-sourced datum (source, method, time, authorization,
+  classification, confidence, retention) — enforced at the repository layer (ADR-003/009/010).
+- **Semantic tier tag** on every claim (ADR-011); no auto-promotion.
+- **Transactional audit interceptor** on security-relevant operations (ADR-005).
+- **Single Policy Decision Point** consulted by every module: RBAC + case-level + ABAC/classification
+  + tenant + legal-authorization boundary (ADR-006).
+- **Case & tenant isolation** enforced at the query layer (row-level scoping), not only in handlers.
 
-### 4.4 Technology baseline (proposed, subject to ADRs)
+### 4.4 Technology baseline (subject to ADRs)
 
 | Concern | Choice | ADR |
 |---|---|---|
-| Backend framework | FastAPI (kept from prototype) | ADR-0003 |
-| Language runtime | Python 3.12+ | ADR-0003 |
-| Relational DB | PostgreSQL 16+ | ADR-0004 |
-| Identifiers | UUIDv7 primary; ULID for sortable public tokens; UUIDv5 for deterministic derivations | ADR-0005 |
-| Evidence storage | Content-addressed object store (SHA-256 address), WORM | ADR-0006 |
-| Audit storage | Append-only table + hash chain + periodic anchored WORM export | ADR-0007 |
-| Frontend | React + Vite, self-hosted build, no CDN | ADR-0008 |
-| Secrets | Env in dev; KMS/secret manager in prod | ADR-0009 |
-| External egress | Single Integration Gateway | ADR-0010 |
-| AuthN/session | Short-lived JWT access + rotating refresh, server-side revocation | ADR-0011 |
+| Backend | FastAPI, Python 3.12+ | — |
+| Relational DB | PostgreSQL 16+ | ADR-001 |
+| Identifiers | UUIDv7 (PK) / ULID (public tokens) / UUIDv5 (deterministic) | ADR-002 |
+| Evidence store | Content-addressed WORM + multi-hash + signed manifests | ADR-003 |
+| Custody | Append-only, hash-linked custody stream | ADR-004 |
+| Audit | Append-only + hash chain + signed checkpoints + WORM anchor | ADR-005 |
+| AuthZ | RBAC + ABAC + case/tenant isolation | ADR-006 |
+| Architecture | Modular monolith | ADR-007 |
+| External egress | Single Authorized Integration Gateway | ADR-008 |
+| Phone intelligence | 3 authorized paths + fusion | ADR-009 |
+| Geolocation | 3 authorized paths + conflict-surfacing fusion | ADR-010 |
+| Semantic tiers | FACT/INTELLIGENCE/CORRELATION/CONCLUSION, no auto-promotion | ADR-011 |
+| Classification | PUBLIC…HIGHLY_RESTRICTED | ADR-012 |
+| Retention | Policies + legal hold + controlled destruction | ADR-013 |
+| Air-gap | Vendored deps, SBOM, local trust anchors | ADR-014 |
+| Private cloud | Private infra topology | ADR-015 |
 
 ---
 
 ## 5. Module Boundaries
 
-Each module exposes a typed service interface, owns its tables (no cross-module raw SQL), and is
-independently testable. Cross-module access goes through service interfaces only.
+Each module owns its tables (no cross-module raw SQL), exposes a typed service interface, and is
+independently testable. All external network calls originate only in the Integration Gateway.
 
 ```
 backend/modules/
-    identity/       — users, roles, permissions, sessions, MFA, authZ policy engine
-    cases/          — case lifecycle, assignments, authorizations, subjects, timeline
-    collection/     — tracking links, destination validation, collection tasks, adapters
-    telemetry/      — telemetry ingestion, normalization, observation store
-    intelligence/   — IP/ASN/Geo/OSINT/Device/Network enrichment modules, risk, timeline
-    correlation/    — entity resolution, candidate matching, confidence, review workflow
-    evidence/       — evidence vault, hashing, custody event stream, integrity verification
-    audit/          — append-only audit, hash chain, integrity verification
-    reporting/      — report composition, versioning, signed export
-    integrations/   — Authorized Integration Gateway, connector registry, purpose binding
+    identity/        — users, roles, permissions, sessions, MFA; RBAC+ABAC policy decision point
+    cases/           — case lifecycle, members, authorizations, subjects, entities, identifiers, timeline
+    tracking/        — investigation links, destination validation, telemetry ingestion & normalization
+    intelligence/    — intelligence sources/records, enrichment adapters, entity graph, risk scoring
+    correlation/     — candidate relationships, confidence, explanation, analyst-review workflow
+    geolocation/     — IP / Wi-Fi-BSSID / cell paths + fusion + conflict detection
+    phone/           — call-records / OSINT / telecom paths + phone-identity fusion
+    evidence/        — evidence vault, hashing, manifests, integrity verification, retention/legal hold
+    custody/         — append-only chain-of-custody event stream
+    audit/           — append-only, hash-chained audit + integrity verification
+    reporting/       — versioned, re-verifiable reports; signed export
+    integrations/    — Authorized Integration Gateway; connector registry; purpose binding; logging
+    compliance/      — classification, retention policies, legal authorizations, compliance abstraction
 ```
 
-| Module | Responsibility | Owns (primary tables) | Key collaborators |
-|---|---|---|---|
-| **identity** | Authentication, sessions, MFA, RBAC + authZ policy decisions | users, roles, permissions, user_roles, sessions | every module (policy checks) |
-| **cases** | Case lifecycle & authorization, assignments, subjects/identifiers, timeline aggregation | cases, case_assignments, case_status_history, case_authorizations, subjects, identifiers, subject_relationships | identity, audit |
-| **collection** | Authorized tracking links, destination-URL security, collection tasks | tracking_links, tracking_link_events, collection_tasks | telemetry, cases, audit |
-| **telemetry** | Ingest raw telemetry, normalize, store observations with provenance | telemetry_events, telemetry_observations | intelligence, evidence, audit |
-| **intelligence** | Pluggable enrichment (IP, ASN, geo, OSINT, device, network), risk scoring | intelligence_sources, intelligence_observations | integrations, correlation, audit |
-| **correlation** | Entity resolution, candidate generation, confidence, human-review workflow | correlation_requests, correlation_results | intelligence, cases, evidence, audit |
-| **evidence** | Immutable artifact storage, hashing, custody stream, integrity verification, retention/legal-hold | evidence, evidence_artifacts, evidence_hashes, custody_events | cases, audit |
-| **audit** | Append-only, hash-chained audit + integrity verification | audit_events, audit_integrity_records | all (consumers) |
-| **reporting** | Compose versioned reports, signed/versioned export | reports, report_versions | cases, evidence, correlation, audit |
-| **integrations** | Single egress boundary; connector registry, auth, schema validation, purpose binding, logging | integration_connectors, integration_requests, integration_results | intelligence, correlation, audit |
+| Module | Responsibility | Key owned tables |
+|---|---|---|
+| identity | AuthN/MFA, sessions, RBAC+ABAC decisions | users, roles, permissions, role_permissions, user_roles, sessions |
+| cases | Case lifecycle, members, subjects/entities/identifiers, authorizations | cases, case_members, case_status_history, subjects, entities, identifiers, entity_relationships, legal_authorizations |
+| tracking | Links, destination security, telemetry | tracking_links, tracking_link_events, telemetry_events, observations |
+| intelligence | Sources, records, enrichment, entity graph | intelligence_sources, intelligence_records |
+| correlation | Candidate links, confidence, review | correlations |
+| geolocation | 3 geo paths + fusion | locations, geolocation_observations |
+| phone | 3 phone paths + fusion | phone_intelligence |
+| evidence | Vault, hashing, manifests, integrity | evidence, evidence_manifests |
+| custody | Custody event stream | chain_of_custody_events |
+| audit | Tamper-evident audit | audit_events, audit_integrity_records |
+| reporting | Versioned re-verifiable reports | reports, report_versions |
+| integrations | Single external egress boundary | external_integrations, integration_events |
+| compliance | Classification, retention, legal | retention_policies, data_classifications |
 
-**Boundary rules (enforced, ADR-0002):**
-1. A module never reads another module's tables directly — only its service interface.
-2. All external network calls originate in `integrations`; other modules request results.
-3. `audit` is write-through for mutating operations and read-only for `auditor`.
-4. `evidence` originals are write-once; no update/delete path exists in its interface.
+**Boundary rules (ADR-007):** (1) a module never reads another's tables directly; (2) all egress is
+via `integrations`; (3) `audit`/`custody`/`evidence` expose no update/delete of integrity records;
+(4) every data access passes the identity policy decision point with case+tenant scoping.
 
 ---
 
-## 6. Database Schema
+## 6. Data Model (Logical ERD)
 
-**Engine:** PostgreSQL 16+. Enums via native `CREATE TYPE`. Soft-deletion only where legally
-permissible (`deleted_at`, never for evidence/audit). Timestamps are `timestamptz` (UTC). Primary
-keys are UUIDv7 (`id uuid`). Human identifiers (case numbers, evidence numbers) are separate unique
-columns.
-
-### 6.1 Logical ERD
+**Engine:** PostgreSQL 16+. PKs `uuid` (UUIDv7). Human identifiers (case/evidence numbers) are
+separate unique columns. `timestamptz` UTC. Native enums for closed sets. FKs, unique constraints,
+check constraints, and indexes on FK/lookup/time columns throughout. Append-only and
+immutable-after-ingestion tables enforce integrity via revoked UPDATE/DELETE grants + triggers.
+Full column catalogue: [architecture/data-model.md](./architecture/data-model.md).
 
 ```mermaid
 erDiagram
+    organizations ||--o{ users : employs
+    organizations ||--o{ cases : owns
     users ||--o{ user_roles : has
     roles ||--o{ user_roles : grants
     roles ||--o{ role_permissions : has
     permissions ||--o{ role_permissions : in
     users ||--o{ sessions : owns
 
-    cases ||--o{ case_assignments : has
-    users ||--o{ case_assignments : assigned
+    cases ||--o{ case_members : has
+    users ||--o{ case_members : member_of
     cases ||--o{ case_status_history : logs
-    cases ||--o{ case_authorizations : governed_by
+    cases ||--o{ legal_authorizations : authorized_by
     cases ||--o{ subjects : involves
     subjects ||--o{ identifiers : known_by
-    subjects ||--o{ subject_relationships : links
+    cases ||--o{ entities : contains
+    entities ||--o{ entity_relationships : links
+    entities ||--o{ identifiers : resolves_to
 
     cases ||--o{ tracking_links : owns
     tracking_links ||--o{ tracking_link_events : records
     tracking_link_events ||--o{ telemetry_events : produces
-    telemetry_events ||--o{ telemetry_observations : normalized_into
+    telemetry_events ||--o{ observations : normalized_into
 
-    intelligence_sources ||--o{ intelligence_observations : yields
-    telemetry_observations ||--o{ intelligence_observations : enriched_into
+    intelligence_sources ||--o{ intelligence_records : yields
+    observations ||--o{ intelligence_records : enriched_into
+    identifiers ||--o{ phone_intelligence : subject_of
+    intelligence_sources ||--o{ phone_intelligence : sourced_by
 
-    cases ||--o{ correlation_requests : initiates
-    correlation_requests ||--o{ correlation_results : produces
-    intelligence_observations ||--o{ correlation_results : supports
+    cases ||--o{ geolocation_observations : has
+    locations ||--o{ geolocation_observations : estimates
+    intelligence_sources ||--o{ geolocation_observations : sourced_by
+
+    cases ||--o{ correlations : within
+    observations ||--o{ correlations : supports
+    intelligence_records ||--o{ correlations : supports
+    correlations ||--o{ findings : leads_to
+    findings ||--o{ conclusions : basis_for
 
     cases ||--o{ evidence : holds
-    evidence ||--o{ evidence_artifacts : has
-    evidence_artifacts ||--o{ evidence_hashes : hashed_by
-    evidence ||--o{ custody_events : tracked_by
+    evidence ||--o{ evidence_manifests : manifested_by
+    evidence ||--o{ chain_of_custody_events : tracked_by
 
     cases ||--o{ reports : summarized_in
     reports ||--o{ report_versions : versioned_as
 
-    integration_connectors ||--o{ integration_requests : handles
-    integration_requests ||--o{ integration_results : returns
-
+    external_integrations ||--o{ integration_events : logs
     retention_policies ||--o{ cases : applies_to
-    legal_holds ||--o{ cases : freezes
-
+    retention_policies ||--o{ evidence : applies_to
+    data_classifications ||--o{ evidence : classifies
     audit_events ||--o{ audit_integrity_records : anchored_by
 ```
 
-### 6.2 Table catalogue
+**Table groups (§25 tables mapped):** identity (`users, roles, permissions, sessions,
+role_permissions, user_roles`); cases (`cases, case_members, subjects, entities, identifiers,
+entity_relationships, case_status_history, legal_authorizations`); tracking (`tracking_links,
+telemetry_events, observations, tracking_link_events`); intelligence (`intelligence_sources,
+intelligence_records`); correlation (`correlations, findings, conclusions`); geolocation
+(`locations, geolocation_observations`); phone (`phone_intelligence`); evidence (`evidence,
+evidence_manifests, chain_of_custody_events`); audit (`audit_events, audit_integrity_records`);
+integrations (`external_integrations, integration_events`); governance (`retention_policies,
+data_classifications`); reporting (`reports, report_versions`); tenancy (`organizations`).
 
-Below, each table lists its purpose, key columns, and integrity rules. `PK` = primary key, `FK` =
-foreign key, `UQ` = unique, `IX` = index, `CK` = check constraint.
-
-#### Identity & access
-
-- **users** — PK `id`; UQ `username`, `email`; `display_name`, `status` (enum: ACTIVE, SUSPENDED,
-  LOCKED, DISABLED), `mfa_enrolled bool`, `password_credential_ref` (never the secret itself),
-  `created_at`, `last_login_at`. CK: status in enum.
-- **roles** — PK `id`; UQ `name` (INVESTIGATOR, SUPERVISOR, AUDITOR, EVIDENCE_VIEWER, ADMIN);
-  `description`.
-- **permissions** — PK `id`; UQ `code` (e.g. `case.transition`, `evidence.read`,
-  `correlation.approve`); `description`.
-- **role_permissions** — PK (`role_id`,`permission_id`); FKs to roles/permissions.
-- **user_roles** — PK (`user_id`,`role_id`); FKs; optional `scope_case_id` FK for case-scoped grants
-  (need-to-know). IX on `user_id`.
-- **sessions** — PK `id`; FK `user_id`; `refresh_token_hash`, `issued_at`, `expires_at`,
-  `revoked_at`, `ip`, `user_agent`. IX `user_id`, `expires_at`.
-
-#### Cases & subjects
-
-- **cases** — PK `id` (UUIDv7); UQ `case_number`; `title`, `description`, `classification` (enum),
-  `priority` (enum), `status` (enum lifecycle), `assigned_investigator_id` FK users,
-  `supervising_officer_id` FK users, `created_at`, `last_activity_at`, `retention_policy_id` FK,
-  `legal_hold_id` FK nullable, `legal_authorization_ref`. CK: status in lifecycle enum. IX on
-  `status`, `assigned_investigator_id`.
-- **case_assignments** — PK `id`; FK `case_id`, `user_id`; `role_in_case`, `assigned_at`,
-  `assigned_by`, `unassigned_at`. UQ (`case_id`,`user_id`, active).
-- **case_status_history** — PK `id`; FK `case_id`; `from_status`, `to_status`, `changed_by` FK
-  users, `changed_at`, `reason`, `authorization_ref`. Append-only (no update/delete).
-- **case_authorizations** — PK `id`; FK `case_id`; `authorization_type`, `reference`, `issued_by`,
-  `valid_from`, `valid_to`, `scope`, `document_evidence_id` FK evidence nullable.
-- **subjects** — PK `id`; FK `case_id`; `label`, `subject_type` (PERSON, ORG, DEVICE, ACCOUNT,
-  UNKNOWN), `classification`, `notes`. Subjects are *investigative entities*, not confirmed
-  identities.
-- **identifiers** — PK `id`; FK `subject_id`; `identifier_type` (IP, EMAIL, PHONE, USERNAME, BSSID,
-  IMEI, HANDLE…), `value`, `confidence`, `first_seen`, `last_seen`, `provenance_ref`. IX
-  (`identifier_type`,`value`).
-- **subject_relationships** — PK `id`; FK `subject_a_id`, `subject_b_id`; `relationship_type`,
-  `confidence`, `basis` (correlation_result_id nullable), `created_at`.
-
-#### Collection & telemetry
-
-- **tracking_links** — PK `id`; FK `case_id`, `created_by`; UQ `token` (ULID/opaque);
-  `destination_url` (validated), `destination_status` (enum: PENDING_VALIDATION, ALLOWED, BLOCKED),
-  `purpose`, `authorization_ref`, `classification`, `retention_policy_id` FK, `active bool`,
-  `created_at`, `expires_at`. CK: destination must be ALLOWED before link is active.
-- **tracking_link_events** — PK `id`; FK `tracking_link_id`; `occurred_at`, `source_ip`,
-  `raw_request_meta jsonb`, `redirect_decision`. Append-only.
-- **collection_tasks** — PK `id`; FK `case_id`, `created_by`; `adapter`, `purpose`,
-  `authorization_ref`, `status`, `params jsonb` (minimized), `created_at`.
-- **telemetry_events** — PK `id`; FK `tracking_link_event_id` nullable, `case_id`; `event_type`,
-  `occurred_at`, `ingested_at`, `raw jsonb`, `classification`, `provenance_ref`. Append-only.
-- **telemetry_observations** — PK `id`; FK `telemetry_event_id`; `observation_type` (IP, UA, OS,
-  DEVICE_CLASS, LANG, TZ, SCREEN…), `value`, `confidence`, `semantic_tier` (=FACT), `provenance_ref`.
-
-#### Intelligence & correlation
-
-- **intelligence_sources** — PK `id`; UQ `name`; `source_type` (IP_INTEL, ASN, GEO, OSINT, DEVICE,
-  NETWORK), `reliability`, `connector_id` FK integration_connectors nullable, `version`,
-  `data_classification`.
-- **intelligence_observations** — PK `id`; FK `source_id`, `telemetry_observation_id` nullable,
-  `case_id`; `observation jsonb`, `confidence`, `semantic_tier` (=INTELLIGENCE), `collected_at`,
-  `authorization_ref`, `provenance_ref`, `analyst_review_id` nullable, `retention_policy_id` FK.
-- **correlation_requests** — PK `id`; FK `case_id`, `requested_by`; `question`, `inputs jsonb`,
-  `authorization_ref`, `status` (PENDING, RUNNING, AWAITING_REVIEW, APPROVED, REJECTED),
-  `created_at`.
-- **correlation_results** — PK `id`; FK `correlation_request_id`; `candidate jsonb`,
-  `confidence numeric`, `evidence_weighting jsonb`, `explanation` (the "why"), `semantic_tier`
-  (=CORRELATION until human-approved → ATTRIBUTION), `reviewed_by` FK users nullable, `reviewed_at`,
-  `review_decision`, `provenance_ref`. CK: becomes attribution only when `review_decision=APPROVED`.
-
-#### Evidence & custody
-
-- **evidence** — PK `id`; UQ `evidence_number`; FK `case_id`; `artifact_type`, `classification`,
-  `retention_policy_id` FK, `legal_hold_id` FK nullable, `status` (enum: COLLECTED, VERIFIED,
-  RELEASED, SEALED), `collected_at`, `collector_id` FK users, `source`, `acquisition_method`,
-  `authorization_ref`. No UPDATE to integrity-bearing columns after ingestion (enforced by trigger +
-  interface).
-- **evidence_artifacts** — PK `id`; FK `evidence_id`; `original_filename`, `mime_type`, `size_bytes`,
-  `storage_address` (content hash = address), `storage_location`, `sealed bool`. UQ
-  `storage_address` (content-addressed dedupe).
-- **evidence_hashes** — PK `id`; FK `evidence_artifact_id`; `algorithm` (SHA-256, SHA-512),
-  `hash_value`, `computed_at`, `computed_by`. Multiple rows allow multi-algorithm proof.
-- **custody_events** — PK `id`; FK `evidence_id`, `actor_id`; `role`, `occurred_at`, `action`
-  (COLLECTED, ACCESSED, TRANSFERRED, SEALED, VERIFIED, EXPORTED…), `previous_state`, `new_state`,
-  `reason`, `session_id`, `source_ip`, `integrity_meta jsonb`. Append-only; forms the custody stream.
-
-#### Audit
-
-- **audit_events** — PK `id` (UUIDv7, monotonic); `seq bigint` UQ (gap-checked); `actor_id`,
-  `role`, `action`, `resource_type`, `resource_id`, `occurred_at`, `before jsonb`, `after jsonb`,
-  `reason`, `session_id`, `source_ip`, `event_hash`, `prev_event_hash`. Append-only; `event_hash =
-  H(canonical(event) || prev_event_hash)`.
-- **audit_integrity_records** — PK `id`; `from_seq`, `to_seq`, `chain_head_hash`, `anchored_at`,
-  `anchor_location` (WORM export ref), `signature`. Periodic checkpoints for fast verification and
-  external anchoring.
-
-#### Reporting
-
-- **reports** — PK `id`; FK `case_id`; `title`, `current_version_id` FK report_versions,
-  `created_by`, `created_at`, `status`.
-- **report_versions** — PK `id`; FK `report_id`; `version_no`, `content_ref` (content-addressed),
-  `content_hash`, `generated_by`, `generated_at`, `approved_by` nullable, `signature` nullable,
-  `included_evidence jsonb` (evidence IDs + hashes snapshot). Immutable once approved.
-
-#### Integrations
-
-- **integration_connectors** — PK `id`; UQ `name`; `connector_type`, `endpoint`, `auth_method`
-  (MTLS, OAUTH, APIKEY), `purpose_binding`, `data_classification`, `rate_limit`, `enabled bool`.
-  Secrets referenced by KMS handle, never stored inline.
-- **integration_requests** — PK `id`; FK `connector_id`, `requested_by`, `case_id`; `purpose`,
-  `authorization_ref`, `request_meta jsonb` (minimized), `requested_at`, `status`. Append-only.
-- **integration_results** — PK `id`; FK `integration_request_id`; `result_meta jsonb`, `confidence`,
-  `provenance_ref`, `received_at`, `data_classification`, `retention_policy_id` FK. Raw payloads
-  retained only if authorized.
-
-#### Governance
-
-- **retention_policies** — PK `id`; UQ `name`; `retention_period`, `disposition` (DELETE, ANONYMIZE,
-  REVIEW), `legal_basis`.
-- **legal_holds** — PK `id`; FK `case_id` nullable (can be broader); `reason`, `issued_by`,
-  `issued_at`, `released_at` nullable, `scope`. While active, blocks deletion/disposition of scoped
-  objects.
-
-### 6.3 Cross-cutting schema conventions
-
-- **Provenance**: `provenance_ref` columns point to a provenance record (source, method, time,
-  authorization, classification, confidence). Modelled as a shared `provenance` table (PK `id`,
-  `source`, `method`, `collected_at`, `authorization_ref`, `classification`, `confidence`,
-  `notes`) referenced widely. *(Added to the logical model; not in the brief's list but required by
-  the governing principle — see ADR-0012.)*
-- **Enum strategy**: native PostgreSQL enums for closed sets; lookup tables where values evolve.
-- **Soft deletion**: only for non-integrity objects; evidence, custody, audit, and status-history
-  tables are strictly append-only (enforced by triggers + revoked UPDATE/DELETE grants).
-- **Indexes**: FK columns, high-cardinality lookup columns (`identifiers(value)`,
-  `audit_events(resource_id)`), and time-range columns (`*_at`) are indexed.
+*Additions beyond the brief's list, required by the governing principle: `organizations` (tenancy),
+`entity_relationships` (entity graph edges), `report_versions` (versioning), `audit_integrity_records`
+(audit anchoring), `role_permissions`/`user_roles` (RBAC join), `data_classifications`. Rationale in
+the data-model doc and ADRs.*
 
 ---
 
-## 7. Security Architecture
+## 7. Evidence Architecture
 
-### 7.1 Identity & authentication
-
-- Password credentials stored only as strong salted hashes (Argon2id, tuned). **MFA-ready**: TOTP
-  first-class, WebAuthn as an extension point.
-- **Sessions**: short-lived JWT access tokens (minutes) + rotating refresh tokens stored
-  server-side by hash, enabling immediate revocation (logout, compromise, role change). See
-  ADR-0011.
-- Token claims are minimal; authorization is resolved server-side at each request, never trusted
-  from the token alone.
-
-### 7.2 Authorization (defense in depth)
-
-A single **policy decision point** consulted by every module, layering:
-
-1. **RBAC** — role → permission codes.
-2. **Case-level** — is the user assigned to (or supervising) this case?
-3. **Resource-level** — object ownership/scope checks (prevents IDOR).
-4. **Need-to-know** — case-scoped grants (`user_roles.scope_case_id`).
-5. **Legal-authorization boundary** — does the action's `authorization_ref` cover this operation and
-   is it currently valid?
-
-Role capability summary:
-
-| Capability | Investigator | Supervisor | Auditor | Evidence Viewer |
-|---|:--:|:--:|:--:|:--:|
-| Create/manage authorized cases | ✅ | ✅ | ❌ | ❌ |
-| Execute investigative actions | ✅ | ✅ | ❌ | ❌ |
-| Create collection tasks | ✅ | ✅ | ❌ | ❌ |
-| Create evidence records | ✅ | ✅ | ❌ | ❌ |
-| Approve sensitive actions / correlation | ❌ | ✅ | ❌ | ❌ |
-| Manage case lifecycle / approve reports | ❌ | ✅ | ❌ | ❌ |
-| Read audit logs & access history | ❌ | ✅ | ✅ | ❌ |
-| Verify record integrity | ❌ | ✅ | ✅ | ❌ |
-| **Modify evidence** | ❌ (append/collect only) | ❌ | ❌ | ❌ |
-| Read authorized evidence | ✅ | ✅ | view access history only | ✅ (read-only) |
-
-> No role can *modify* an original evidence artifact — immutability is structural, not role-based.
-
-### 7.3 Encryption
-
-- **At rest**: PostgreSQL transparent/volume encryption + column-level encryption for the most
-  sensitive fields (identifiers, integration payloads); evidence store encrypted; **backups
-  encrypted**; secrets in KMS; sensitive config encrypted.
-- **In transit**: TLS everywhere; **mTLS** between DILIP core and the Integration Gateway, and
-  between the gateway and approved external systems.
-- **Certificate management**: internal CA in air-gapped/private-cloud mode; documented rotation.
-
-### 7.4 Secrets
-
-- **No secrets in source** (enforced by secret-scanning in CI — see [§16](#16-testing-strategy)).
-- Dev: environment variables / local `.env` excluded from VCS.
-- Prod: KMS / secret manager; application receives short-lived, scoped credentials.
-
-### 7.5 Application security controls
-
-- Input validation at the API boundary (Pydantic models); output encoding in the frontend.
-- CORS locked to known origins; strict CSP (no external origins — supports air-gap).
-- Rate limiting on auth, tracking endpoints, and gateway calls.
-- SSRF/open-redirect defenses on tracking destinations (see [§10.6](#106-tracking-destination-url-security)).
-- Parameterized queries / ORM only; no string-built SQL.
-
----
-
-## 8. Evidence Architecture
-
-### 8.1 Evidence Vault
-
-Not a table — a subsystem enforcing **immutability + provable integrity + custody**.
+Not a table — a subsystem enforcing **immutability + provable integrity** (EVID-1…4, ADR-003).
 
 ```
 Ingestion:
   artifact bytes
-     → compute SHA-256 (and SHA-512 for high-value)
-        → storage_address = content hash  (content-addressed store, WORM)
-           → write evidence + evidence_artifacts + evidence_hashes (single tx)
-              → emit custody_event(action=COLLECTED)
-                 → emit audit_event
+    → compute SHA-256 (+ SHA-512 for high-value)
+      → storage_address = content digest  (content-addressed store, WORM, encrypted at rest)
+        → write evidence + evidence_manifests (single tx)
+          → emit chain_of_custody_events(action=COLLECTED, prev_hash→new_hash)
+            → emit audit_event (transactional)
 ```
 
-Once ingested, the artifact is **write-once**. There is no update or delete path in the evidence
-interface. Deletion is possible only through a governed retention/disposition workflow, and **never**
-while a legal hold is active.
-
-### 8.2 Integrity — proving sameness
-
-The requirement is not "we have a hash" but "we can prove the artifact shown now is the artifact
-collected then." Mechanisms:
-
-- **Content-addressed storage**: the storage key *is* the SHA-256 digest, so a mismatched byte
-  cannot resolve to the same address.
-- **Multi-algorithm hashes** (SHA-256 + SHA-512) for high-value evidence, guarding against a single
-  algorithm's future weakness.
-- **Signed manifests**: per-case and per-export manifests list `{evidence_number, storage_address,
-  hashes}` and are cryptographically signed.
-- **Timestamping**: manifests carry trusted timestamps (RFC-3161-style) to bind *when* integrity was
-  attested.
-- **Verification operation**: `VERIFY EVIDENCE` recomputes hashes from stored bytes and compares to
-  `evidence_hashes` and the signed manifest → PASS/FAIL, itself audited.
-
-See ADR-0006.
-
-### 8.3 Chain of custody as an event stream
-
-Custody is **not** a status string. It is an append-only stream of `custody_events`:
-
-```
-Evidence ──▶ custody_event(COLLECTED) ──▶ custody_event(ACCESSED)
-         ──▶ custody_event(VERIFIED)  ──▶ custody_event(SEALED)
-         ──▶ custody_event(EXPORTED)
-```
-
-Each event records actor, role, timestamp, action, previous state, new state, reason, session/IP,
-and integrity metadata. The **complete history is reconstructable** by replaying the stream — a
-requirement for legal defensibility.
-
-### 8.4 Retention & legal hold
-
-- Every evidence object references a retention policy; disposition runs only after the period and
-  only if no legal hold applies.
-- A **legal hold** freezes disposition immediately and is itself audited (issued_by, reason).
+- **Content-addressed storage**: the storage key *is* the SHA-256 digest → altered bytes cannot
+  resolve to the same address.
+- **Multi-algorithm hashing** (SHA-256 always; SHA-512 for high-value) guards against future
+  algorithm weakness.
+- **Signed manifests** list `{evidence_number, storage_address, hashes, classification}` and are
+  cryptographically signed; per-case and per-export manifests exist.
+- **Timestamping** binds integrity attestation to a time (trust anchor is an Open Question in
+  air-gapped mode).
+- **Verification op** `VERIFY EVIDENCE` recomputes hashes from stored bytes, compares to manifest →
+  PASS/FAIL, itself audited.
+- **Encryption** at rest (store + backups) and in transit (TLS/mTLS).
+- **No update/delete path** in the evidence interface; disposition only via governed
+  retention/destruction ([§22](#22-data-classification-retention--destruction)) and never under legal
+  hold.
 
 ---
 
-## 9. Audit Architecture
+## 8. Chain of Custody Architecture
 
-### 9.1 Append-only, tamper-evident
-
-Audit is not an ordinary editable table. Design:
+Custody is an **append-only event stream** (EVID-3, ADR-004), not a status string.
 
 ```
-Application action
-   → Audit Event (canonicalized)
-      → event_hash = H(canonical(event) || prev_event_hash)
+Evidence ─▶ COLLECTED ─▶ IMPORTED ─▶ VERIFIED ─▶ ACCESSED ─▶ TRANSFERRED
+         ─▶ REVIEWED ─▶ REFERENCED_IN_REPORT ─▶ ARCHIVED
+```
+
+Each `chain_of_custody_events` row records: **who** (actor+role), **what** (action), **when**,
+**why** (reason), **from where / to where**, **authorization**, **previous_hash**, **new_hash**,
+session/IP. Events are hash-linked (`new_hash = H(canonical(event) || previous_hash)`) so any
+content or ordering change is detectable, and the **complete history is reconstructable** by
+replaying the stream. Custody events are append-only (UPDATE/DELETE revoked).
+
+---
+
+## 9. Immutable Audit Architecture
+
+An ordinary "immutable" table is not accepted. Design is **tamper-evident** (SEC-5, ADR-005):
+
+```
+Action → Audit Event (canonicalized)
+       → event_hash = H(canonical(event) || prev_event_hash)
          → append-only store (UPDATE/DELETE grants revoked)
-            → periodic checkpoint → audit_integrity_records (chain head, signed)
-               → export to immutable / WORM storage
+           → monotonic seq (gap-detected)
+             → periodic signed checkpoint → audit_integrity_records
+               → external / WORM anchoring
 ```
 
-Each event chains to its predecessor by hash, so altering or removing any event breaks the chain
-from that point forward. A monotonic `seq` provides gap detection independent of the hash chain.
-
-### 9.2 Verification
-
-`VERIFY AUDIT INTEGRITY`:
-1. Recompute the hash chain from the last trusted checkpoint (or genesis).
-2. Check `seq` continuity (no gaps/reordering).
-3. Compare the recomputed chain head to the signed `audit_integrity_records` head.
-4. Return **PASS / FAIL** with the first divergent `seq` if FAIL. The verification run is itself
-   audited.
-
-### 9.3 Scope & retention
-
-- Every security-relevant action across all modules emits an audit event, written **transactionally**
-  with the action it describes (no "best effort" logging for security events).
-- Audit retention is governed and typically the longest in the system; audit is never subject to
-  routine soft-deletion.
-
-See ADR-0007.
+- **Append-only + hash chain**: altering/removing any event breaks the chain from that point;
+  `seq` detects gaps/reordering independently.
+- **Signed checkpoints** + **WORM/external anchoring** allow fast verification and protect against
+  application-layer compromise: even a compromised app cannot silently rewrite anchored history
+  without breaking signatures held outside the app trust boundary.
+- **Admin cannot delete the audit trail** with ordinary application-admin rights: UPDATE/DELETE are
+  revoked at the DB role level; the anchoring key is held separately (KMS / offline), so tampering
+  is *detectable* even under partial compromise (defense discussed in ADR-005).
+- **Verification op** `VERIFY AUDIT INTEGRITY` → PASS/FAIL, reporting the first divergent `seq`;
+  the run is itself audited.
+- Security-relevant audit events are written **transactionally** with the action they describe.
 
 ---
 
-## 10. Intelligence Architecture
+## 10. Phone Intelligence Architecture
 
-### 10.1 Pipeline
+**Core rule:** DILIP does not "learn the phone number" because someone visited a link. Any
+phone-identity signal enters through one of three **separate, authorized** paths, each documented
+with what it **can** and **cannot** establish (FR-5, INT-1…4, ADR-009). None turns an HTTP request
+into an MSISDN.
 
-```
-Collection Adapter → Normalizer → Validation → Provenance → Enrichment → Correlation
-```
-
-Every stage preserves and extends the provenance envelope; nothing advances without source, method,
-time, authorization, classification, and confidence.
-
-### 10.2 Modular intelligence layer
-
-Independent, pluggable modules, each producing *observations* (never bare facts):
-
-`IP Intelligence · ASN Intelligence · Geo Intelligence · OSINT · Device Intelligence · Network
-Intelligence · Identity Correlation · Entity Resolution · Risk Scoring · Timeline Analysis`
-
-Each result = **observation + source + timestamp + confidence + provenance + analyst review**.
-
-### 10.3 Collection/enrichment adapters
-
-Adapters are pluggable and uniform: they implement a common interface (`collect`, `normalize`,
-`validate`, `enrich`) and declare their source, classification, and authorization requirements. New
-sources are added as adapters without touching the core.
-
-### 10.4 Correlation engine
-
-Correlation **never** emits `IP → Person`. It emits:
+### 10.1 PATH 1 — Authorized Call / Communication Records
 
 ```
-Observations → Candidate Matches → Evidence Weighting → Confidence → Correlation Result → Human Review
+Authorized Records → Observed Identifier + Source + Authorization + Timestamp + Evidence
+                   → Correlation Engine → Candidate Relationship (confidence) → Human Review
 ```
+Stored: phone identifiers, call timestamps/direction/duration, related identifiers,
+subscriber/account metadata *if authorized*, plus source, authorization, timestamp, evidence.
 
-and can **explain** every link. Worked example (from the brief):
+| CAN establish | CANNOT establish |
+|---|---|
+| That an authorized record contains an identifier and associated call metadata | `Phone → Person` automatically; identity without correlation + human review |
+| A *candidate* relationship for review | Anything beyond the authorization's scope |
 
-```
-CASE-2026-0042
-  → IP observed at 14:32                (FACT)
-  → matched against authorized subscriber dataset via timestamp/network context  (INTELLIGENCE)
-  → candidate subscriber                (CORRELATION, confidence 92%)
-  → REQUIRES Supervisor Review          → on approval becomes ATTRIBUTION
-```
-
-Confidence, contributing observations, and provenance are stored so the "why" is reproducible.
-
-### 10.5 Fact vs Intelligence vs Conclusion
-
-Every stored claim carries a `semantic_tier`:
-
-| Tier | Meaning | Example |
-|---|---|---|
-| **FACT** | Directly observed & recorded | "IP 185.x.x.x was observed at T." |
-| **INTELLIGENCE** | Derived from a source, attributed | "IP is associated with ASN X per source Y." |
-| **CORRELATION** | Candidate link with confidence | "Observed IP correlates with subscriber record X (92%)." |
-| **CONCLUSION** | Analyst assessment | "Investigator assesses that…" |
-
-The system **never auto-promotes** a lower tier to a higher one. Promotion of CORRELATION →
-ATTRIBUTION requires an explicit, audited human decision.
-
-### 10.6 Tracking destination-URL security
-
-The tracking endpoint must not become an **open redirect** or **SSRF** vector. Before a destination
-is marked `ALLOWED`:
-
-- Scheme validation (reject non-`http(s)`), **HTTPS enforcement**.
-- **Domain allowlist**; URL normalization to defeat obfuscation.
-- **SSRF protection**: resolve and reject private/loopback/link-local/internal ranges; block
-  `localhost`; consider **DNS-rebinding** (re-validate at request time, not just at creation).
-- **Redirect-chain policy**: bounded, validated at each hop.
-- Full **logging** of decisions.
-
-Clear separation is enforced:
+### 10.2 PATH 2 — Authorized OSINT / External Intelligence
 
 ```
-Tracking Endpoint → Collection → Validated Destination
+Public/Authorized OSINT → Identifier↔Entity association → stored as INTELLIGENCE (not FACT)
+                        → Cross-source validation → Confidence → Human Review
 ```
+Stored: source, collection timestamp, source reliability, data freshness, confidence, original
+reference, authorization.
 
-Collection and redirection are distinct steps; the redirect only fires to a pre-validated,
-re-checked destination.
+| CAN establish | CANNOT establish |
+|---|---|
+| Publicly/authorized-source associations as **INTELLIGENCE** leads | FACT from OSINT alone; conclusive identity without corroborating evidence + review |
+
+### 10.3 PATH 3 — Authorized Telecom / Signaling Intelligence
+
+Only when the operating authority is legally and technically authorized. DILIP **receives**
+documented results; it never intercepts.
+
+```
+Authorized Telecom System → Secure Integration Boundary → DILIP Gateway
+                          → Normalization → Evidence/Intelligence Store → Correlation
+```
+Controls: strong authN, **mTLS**, request authorization, **purpose binding**, audit, data
+minimization, rate limiting, response provenance, legal authorization reference. Telecom
+infrastructure is **never** connected directly to the core application.
+
+| CAN establish | CANNOT establish |
+|---|---|
+| An authorized result provided by the approved external system, with provenance | Anything DILIP itself "derives" from the network — it derives nothing; it records authorized results |
+| **Hard boundary** | DILIP must never become a telecom/signaling interception or intrusion platform (§37) |
+
+### 10.4 Phone Intelligence Fusion (§11)
+
+```
+Call Records + OSINT + Authorized Telecom Intelligence
+   → Correlation Engine → Identity Candidates → Confidence Score → Human Review → Finding
+```
+**Confidence ≠ Fact.** No automatic `CORRELATION → FACT`. Conflicts across paths are surfaced and
+preserved; the analyst attributes the conclusion, which is audited.
 
 ---
 
-## 11. Phone Identity Correlation Architecture
+## 11. Geolocation Architecture
 
-**Core rule:** a tracking link cannot extract a phone number. Any subscriber/phone attribution is
-the product of an *authorized, documented correlation* through one of three **separate** adapters.
-None of them turns an HTTP request into an MSISDN.
+Three independent paths, never conflated, each with explicit precision limits, provenance, and
+confidence (FR-6, INT-5, ADR-010).
 
-### 11.1 Method 1 — Authorized Call/Contact Records
-
-```
-Observed Identifier → Authorized Records → Matching/Correlation → Subscriber Candidate
-   → Confidence Score → Human Review
-```
-
-Stored: record source, record time, reference ID, matching attributes, confidence, authorization
-reference, reviewer, correlation timestamp.
-
-| | |
-|---|---|
-| **Can conclude** | A *candidate* subscriber consistent with authorized records, pending human review. |
-| **Cannot conclude** | A confirmed identity without review; anything beyond the authorization's scope. |
-| **Guardrail** | No mechanism for unauthorized access to communications records is designed or built. |
-
-### 11.2 Method 2 — Public OSINT
+### 11.1 GEO PATH 1 — IP Geolocation
 
 ```
-Public Identifier → OSINT Sources → Entity Resolution → Candidate Identity
-   → Cross-source Validation → Confidence
+IP + Timestamp + Authorized Geo Provider → {Country, Region, City, approx coords, ASN, ISP, network, confidence}
 ```
+Stored with `method=IP_GEOLOCATION`, `accuracy_estimate`, `provider`, `timestamp`, `confidence`.
+Result is an **Estimated Location**, explicitly **not** a GPS exact fix.
 
-Stored: URL/source, collection timestamp, source reliability, extracted fact, evidence
-snapshot/hash, confidence, analyst notes.
-
-| | |
-|---|---|
-| **Can conclude** | Publicly-associated candidate leads, cross-source corroborated. |
-| **Cannot conclude** | Final proof of identity from OSINT **alone** — never conclusive by itself. |
-| **Guardrail** | Snapshots are hashed and stored as evidence with provenance; OSINT stays INTELLIGENCE tier. |
-
-### 11.3 Method 3 — Authorized Telecom / Signaling / Network Integration
-
-Only when the operating authority holds legal authorization and a formal integration with an
-approved provider. DILIP **receives** results; it does not intercept.
+### 11.2 GEO PATH 2 — Wi-Fi / BSSID Intelligence
 
 ```
-DILIP → Authorized Integration Gateway → Approved Telecom/Network System
-      → Authorized Result → DILIP Correlation Engine
+BSSID + Timestamp + Source → Network/Location Intelligence → Candidate Location
 ```
+Stored: source, timestamp, accuracy, confidence, provenance, authorization. BSSID alone is **not**
+conclusive proof of a person's identity; a normal browser does not expose BSSID — it must come from
+an authorized source.
 
-Controls: strong authentication, **mTLS**, request authorization, **purpose binding**, audit, data
-minimization, rate limiting, response provenance, legal authorization reference. Raw telecom data is
-stored **only** if required and authorized.
-
-| | |
-|---|---|
-| **Can conclude** | An authorized correlation result provided by the approved system, with provenance. |
-| **Cannot conclude** | Anything DILIP itself "derived" from the network — it derives nothing; it records what the authorized system returned. |
-| **Guardrail (hard boundary)** | DILIP must **never** become a platform for intercepting communications or intruding on telecom networks. It is a consumer of authorized results only. |
-
----
-
-## 12. Geolocation Architecture
-
-Multiple sources, **never conflated**, each with explicit precision limits, provenance, and
-confidence.
-
-### 12.1 Method 1 — IP Geolocation
+### 11.3 GEO PATH 3 — Cell Tower / Cellular Location
 
 ```
-Source IP → IP Intelligence Provider / Local DB → {Country, Region, City, ASN, Network}
-   → Approximate Location
+Cell/Tower ID + Timestamp + Provider → Estimated coords + accuracy/radius
+   → Geographic Candidate → Temporal Movement Pattern
 ```
+Never represented as a GPS exact fix unless the source itself provides that precision.
 
-Stored: provider/DB version, lookup timestamp, result, confidence, approximation radius. **Treated
-as approximate — not GPS.**
-
-### 12.2 Method 2 — Wi-Fi / BSSID Intelligence
+### 11.4 Geolocation Fusion Engine (§15)
 
 ```
-BSSID → Authorized Wi-Fi Intelligence Dataset → Known Location Candidate → Confidence
+IP Geo + Wi-Fi/BSSID + Cellular → Fusion → Candidate Locations → Confidence
+       → Temporal Correlation → Human Review
 ```
-
-Stored: BSSID (where legally appropriate), source, timestamp, dataset version, location result,
-confidence, provenance. **A normal browser does not expose BSSID** — the identifier must come from an
-authorized source/collection environment.
-
-### 12.3 Method 3 — Cell / Network Location
+**Conflicts are never hidden.** If sources disagree, the system marks **CONFLICT DETECTED** and
+preserves every result with its source and confidence:
 
 ```
-Cell/Network Observations → Authorized Network Source → Cell Location Model
-   → Approximate Geographic Area → Confidence/Accuracy
+IP → Amman        BSSID → Zarqa        Cell → Amman        Status → CONFLICT DETECTED
 ```
-
-Supports multiple observations, timestamp correlation, confidence, estimated accuracy, source
-provenance. **Never presented as precise coordinates** when the source does not support that
-precision.
-
-### 12.4 Location Fusion Layer
-
-Not three silos — a fusion layer that combines IP geo + Wi-Fi/BSSID + cell/network + optional
-authorized GPS:
-
-```
-Location Observations → Source weighting → Conflict detection → Confidence calculation
-   → Approximate location → Analyst review
-```
-
-**Disagreement is surfaced, never hidden:**
-
-```
-Source A → Amman        Source B → Zarqa        Source C → Unknown
-                        Status → CONFLICT
-```
-
-with each result's source and explanation preserved.
 
 | Source | Precision | Depends on |
 |---|---|---|
 | IP Geo | Country/city, approximate radius | provider DB accuracy |
-| Wi-Fi/BSSID | Building/AP-level *when* dataset covers it | authorized dataset + authorized BSSID capture |
-| Cell/Network | Cell-area, model-estimated accuracy | authorized network source |
-| Authorized GPS | Precise *if and only if* lawfully provided | authorized device integration |
+| Wi-Fi/BSSID | AP/building-level *when covered* | authorized dataset + authorized capture |
+| Cellular | Cell-area, model-estimated | authorized network source |
+| Authorized GPS | Precise *iff* lawfully provided | authorized device integration |
 
 ---
 
-## 13. Threat Model
+## 12. Intelligence, Correlation & Entity Graph
 
-Methodology: enumerate actors and abuse cases, then rate Impact / Likelihood, define Mitigation and
-Residual Risk. This is a Phase-0 baseline to be deepened before implementation (STRIDE per module).
+### 12.1 Entity Graph (§20, FR-7)
 
-### 13.1 Actors
+Nodes: `Person, Device, Phone, IP, Domain, URL, Account, Email, Location, BSSID, Cell, Case,
+Evidence, Observation, Organization`.
+Edges (typed, each with **confidence + provenance**): `ASSOCIATED_WITH, OBSERVED_ON, RESOLVES_TO,
+BELONGS_TO, LOCATED_AT, CONNECTED_TO, MENTIONED_IN, SUPPORTED_BY, CONTRADICTS`.
 
-External attacker · Malicious insider · Compromised investigator account · Compromised integration ·
-Court/oversight (legitimate scrutiny — a design *audience*, not a threat).
+Modelled relationally as `entities` (nodes) + `entity_relationships` (edges with `type`,
+`confidence`, `provenance_ref`, `basis` → correlation/evidence). `CONTRADICTS` edges make conflict a
+first-class graph fact (supports INT-5). A native graph DB is deferred (ADR-007 discusses the
+extraction path) — the relational edge model is sufficient for Phase 3 and keeps the store unified.
 
-### 13.2 Abuse cases & mitigations
+### 12.2 Correlation Engine (§21, INT-3/4)
 
-| # | Threat | Impact | Likelihood | Mitigation | Residual |
-|---|---|---|---|---|---|
-| T1 | External attacker breaches API | High | Med | TLS, strong authN, rate limiting, input validation, least privilege, network segmentation | Low–Med |
-| T2 | Malicious insider exfiltrates data | High | Med | Need-to-know + case-level authZ, data classification, audit of every access, data minimization, DLP at egress | Med |
-| T3 | Compromised investigator account | High | Med | MFA, short-lived tokens + revocation, anomaly detection, supervisor approval for sensitive actions | Med |
-| T4 | Compromised integration/connector | High | Low–Med | Gateway isolation, mTLS, per-connector scope, no direct DB access, schema validation, failure isolation | Low |
-| T5 | Malicious input (injection/XSS) | High | Med | Parameterized queries/ORM, Pydantic validation, output encoding, strict CSP | Low |
-| T6 | Malicious destination URL (SSRF/open-redirect) | High | Med | Scheme/HTTPS enforcement, allowlist, private-IP blocking, DNS-rebinding re-check, redirect policy | Low |
-| T7 | Database compromise | Critical | Low | Encryption at rest, column encryption for sensitive fields, key separation via KMS, least-privilege DB roles | Med |
-| T8 | **Evidence tampering** | Critical | Low | Content-addressed WORM store, multi-hash, signed manifests, immutable custody stream, verification op | Low |
-| T9 | **Audit tampering** | Critical | Low | Append-only store, hash chaining, seq gap detection, signed checkpoints, WORM export, verify op | Low |
-| T10 | Data exfiltration via reports/export | High | Med | Classification-aware export, approval workflow, watermarking/signing, audit of exports | Med |
-| T11 | **Unauthorized correlation / over-attribution** | High (rights impact) | Med | Mandatory human review, semantic-tier separation, authorization-boundary checks, purpose binding | Med |
-| T12 | Secret leakage in source/logs | High | Med | No secrets in source, secret scanning in CI, log redaction, KMS | Low |
-| T13 | Air-gap violation (external fetch) | Med | Med | Vendored deps, strict CSP, egress only via gateway, build-time dependency pinning | Low |
-
-**Highest-priority invariants:** evidence integrity (T8), audit integrity (T9), and prevention of
-unauthorized/over-confident attribution (T11) — these define whether output is legal-grade.
-
----
-
-## 14. Data Classification & Retention
-
-### 14.1 Classification model
-
-`PUBLIC · INTERNAL · CONFIDENTIAL · RESTRICTED · HIGHLY_RESTRICTED` — every data object declares its
-class; access and export policy derive from it.
-
-| Class | Example data | Handling |
-|---|---|---|
-| PUBLIC | Published OSINT snapshot | Standard controls |
-| INTERNAL | Case metadata, non-sensitive config | Authenticated access |
-| CONFIDENTIAL | Telemetry observations, IP-geo results | Case-scoped + need-to-know |
-| RESTRICTED | Subject identifiers, correlation results | Supervisor-gated actions, column encryption |
-| HIGHLY_RESTRICTED | Authorized telecom results, subscriber candidates, legal authorizations | mTLS-only source, strictest need-to-know, longest audit, column encryption |
-
-### 14.2 Retention & minimization
-
-- **Data minimization** (COMP-MIN-1): nothing is collected without purpose + authorization + type +
-  retention + access policy. Tracking links and collection tasks cannot exist without these fields.
-- **Retention policies** define period + disposition (DELETE / ANONYMIZE / REVIEW) + legal basis.
-- **Legal hold** overrides disposition; evidence and audit are never routinely deleted.
-- Raw integration/telecom payloads are retained only when explicitly authorized; otherwise only
-  minimized results + provenance are kept.
-
----
-
-## 15. Deployment Architecture
-
-### 15.1 Mode A — Air-gapped
-
-- **No** CDN, external JS, external fonts, or external APIs except through the approved gateway.
-- All dependencies **vendored, mirrored, locally hosted, version-pinned** (frontend and backend).
-- Internal CA for TLS/mTLS; strict CSP with no external origins.
-- Frontend served as a locally-built static bundle.
-
-### 15.2 Mode B — Private Cloud
-
-- Private PostgreSQL (with PITR), private object storage (WORM-capable for evidence/audit), internal
-  DNS, internal identity provider, private container registry, network segmentation between tiers
-  (frontend / API / data / gateway).
-- The Integration Gateway sits in its own segment; only it may egress to approved external systems.
-
-### 15.3 Topology (both modes)
+Logically **separate from the Evidence Store**; it **never writes conclusions directly**.
 
 ```
-[Segmented network]
-  Frontend tier (static bundle)  →  API tier (FastAPI, modular monolith)
-                                       ├─ Data tier: PostgreSQL (encrypted, PITR)
-                                       ├─ Evidence store (content-addressed, WORM)
-                                       ├─ Audit store (append-only, WORM export)
-                                       └─ Integration Gateway segment ──▶ Approved external systems
+Evidence + Observations + Identifiers + External Intelligence + Temporal Context
+   → Correlation → Candidate Relationships → Confidence → Analyst Review
 ```
 
-### 15.4 Reliability (must be *proven*, not asserted)
-
-Required and to be **demonstrated**, not claimed:
+Worked example (semantic tiers preserved):
 
 ```
-Backup → Restore → Verification → RTO → RPO
+FACT:         IP 1.2.3.4 observed at 12:03
+INTELLIGENCE: IP belongs to ISP X (source Y, confidence, provenance)
+CORRELATION:  IP + identifier + timestamp correlate with Entity Y (confidence 92%)
+CONCLUSION:   Analyst assesses Entity Y is likely associated  ← human, attributed, audited
 ```
 
-- Database backups + **point-in-time recovery**; evidence + audit backups.
-- **Restore testing** on a schedule (a backup that has never been restored is not a backup).
-- Defined **RTO/RPO** (values are an OPEN QUESTION — business input needed).
-- Health checks, structured logging, metrics, alerting, failure isolation between modules and the
-  gateway.
+Every correlation stores its contributing inputs and an **explanation**, so "why were these linked?"
+is reproducible (NFR-6). Promotion to attribution/conclusion is an explicit, audited human action
+(INT-4, ADR-011).
 
----
+### 12.3 Semantic Evidence Model (§19, ADR-011)
 
-## 16. Testing Strategy
-
-| Layer | Coverage |
+| Tier | Meaning |
 |---|---|
-| **Unit** | Domain logic per module (lifecycle transitions, confidence math, semantic-tier rules, URL validation). |
-| **Integration** | PostgreSQL + evidence store + gateway (with stub connectors); migrations; transactional audit. |
-| **Security** | AuthN, authZ, **IDOR**, **SSRF**, **open redirect**, injection, CORS/CSP, session handling, **secrets exposure** (secret scanning in CI). |
-| **Evidence** | Hash verification, **tamper detection**, custody-sequence correctness, export integrity. |
-| **Audit** | Append-only enforcement, hash-chain integrity, **tamper detection**, seq-gap detection, verify PASS/FAIL. |
-| **End-to-end** | Create Case → Authorized Collection → Telemetry → Enrichment → Correlation → Evidence → Review → Report → **Audit Verification**. |
+| FACT | Directly observed & recorded |
+| INTELLIGENCE | Derived from an attributed source |
+| CORRELATION | Candidate link with confidence |
+| CONCLUSION | Analyst assessment (explainable, evidence-backed, attributable, audited) |
 
-Security and integrity tests (SSRF, open-redirect, evidence-tamper, audit-tamper) are **release
-gates**, not optional. The E2E scenario doubles as the acceptance test for the whole pipeline.
+`Correlation → Fact` is **never** automatic.
 
 ---
 
-## 17. Prototype Migration Plan
+## 13. Security Architecture
 
-Nothing is rewritten blindly. Disposition per component, with rationale.
+- **Zero Trust / least privilege** (SEC-1): authenticate and authorize every request; no implicit
+  trust from network position.
+- **AuthN + MFA** (SEC-1): Argon2id password hashing; MFA required (mechanism is an Open Question —
+  TOTP vs WebAuthn); short-lived access tokens + rotating server-side refresh tokens with immediate
+  revocation.
+- **Authorization** (SEC-2, ADR-006): single Policy Decision Point layering **RBAC** (roles →
+  permissions) + **case-level** (membership) + **ABAC/classification** (attributes, clearance) +
+  **tenant** (org) + **legal-authorization boundary**. Investigator on Case A cannot reach Case B by
+  default; enforced at the query layer (row scoping), not only in handlers.
 
-| Prototype Component | Keep | Refactor | Replace | Remove | Rationale |
-|---|:--:|:--:|:--:|:--:|---|
-| **FastAPI** | ✅ | | | | Solid async API framework; validates well with Pydantic. Reorganize into modular structure. |
-| **SQLite** | | | ✅ | | Single-writer, weak concurrency/integrity/encryption/PITR. Replace with PostgreSQL (ADR-0004). |
-| **React SPA** | | ✅ | | | Keep React; extract from the Python string into a real `frontend/` with Vite build (ADR-0008). |
-| **Tailwind (CDN)** | | ✅ | | | Keep Tailwind; **self-host** via local build. CDN breaks air-gap (remove CDN, not Tailwind). |
-| **Tracking Links** | | ✅ | | | Concept kept; harden destination validation, SSRF/open-redirect defenses, provenance, authorization binding. |
-| **Events (telemetry)** | | ✅ | | | Keep event capture; add normalization, provenance envelope, semantic-tier tagging, real store. |
-| **Evidence** | | | ✅ | | Prototype has no real vault. Replace with content-addressed WORM store + hashing + custody stream. |
-| **Audit** | | | ✅ | | Replace any plain/absent audit with append-only, hash-chained, WORM-exported audit. |
-| **Users / RBAC** | | ✅ | | | Keep the notion; build real RBAC + case/resource/need-to-know + MFA-ready sessions. |
-| **Mock correlation data** | | | | ✅ | Remove. Replace with real correlation engine emitting candidates + confidence + provenance + review. Mocks violate the provenance principle. |
-| **Synthetic/demo telemetry** | | | | ✅ | Remove from production paths; retain only as clearly-labelled test fixtures. |
-| **Single-file packaging** | | | ✅ | | Replace with modular monolith layout; untestable monolith-in-a-string cannot be a production baseline. |
+  | Capability | Investigator | Supervisor | Auditor | Evidence Viewer |
+  |---|:--:|:--:|:--:|:--:|
+  | Investigate / collect / correlate (authorized) | ✅ | ✅ | ❌ | ❌ |
+  | Review & approve actions/conclusions, manage lifecycle | ❌ | ✅ | ❌ | ❌ |
+  | Read audit trail & evidence provenance | ❌ | ✅ | ✅ | ❌ |
+  | Modify evidence / audit | ❌ | ❌ | ❌ | ❌ |
+  | View authorized evidence | ✅ | ✅ | history only | ✅ (read-only) |
+
+- **Tenant/case isolation** (SEC-3): org + case scoping on every row access; cross-case access is a
+  monitored, audited exception path (never default).
+- **Encryption** (SEC-4): at rest (DB volume + column-level for identifiers/phone/telecom results;
+  evidence store; backups; secrets), in transit (TLS; **mTLS** core↔gateway↔external). Keys in
+  **KMS**; envelope encryption; documented rotation; internal CA in air-gapped mode.
+- **Secrets** (SEC-4): none in source (CI secret scanning); env in dev, secret manager/KMS in prod.
+- **App controls** (SEC-6): Pydantic input validation; output encoding; strict CSP (no external
+  origins — supports air-gap); CORS locked; security headers; rate limiting on auth/tracking/gateway;
+  parameterized queries/ORM only; **SSRF + open-redirect** defenses on destinations ([§10 tracking](#101-path-1--authorized-call--communication-records) rules in the tracking module).
+- **Supply chain** (SEC-7): pinned dependencies, vulnerability scanning, **SBOM** generation, and
+  **signed build artifacts**; offline mirror in air-gapped mode.
+- **Integration boundary** (SEC-8, ADR-008): all external contact via the gateway; no external
+  system reaches the core DB.
 
 ---
 
-## 18. ADR List
+## 14. Threat Model
 
-Architecture Decision Records to be authored and approved (skeletons under `docs/adr/`). Each ADR
-captures context, options, decision, and consequences.
+STRIDE-based; each threat rated across Impact / Likelihood / Attack Surface, with Mitigation,
+Residual Risk, Detection, and Response. Phase-0 baseline; per-module STRIDE with data-flow diagrams
+is a Phase-1 entry task. Standalone: [architecture/threat-model.md](./architecture/threat-model.md).
 
-| ADR | Decision | Why it needs an ADR |
+| # | Threat | Impact | Likelihood | Attack Surface | Mitigation | Residual | Detection | Response |
+|---|---|---|---|---|---|---|---|---|
+| T1 | Malicious investigator | High | Med | Authenticated app | Case/tenant scoping, ABAC, per-access audit, supervisor approval | Med | Access-pattern anomaly, audit review | Revoke, preserve audit, review |
+| T2 | Compromised investigator account | High | Med | Auth surface | MFA, short-lived+revocable tokens, anomaly detection | Med | Impossible-travel/anomaly alerts | Revoke sessions, force re-auth |
+| T3 | Privileged admin abuse | Critical | Low | Admin plane | Separation of duties, audit UPDATE/DELETE revoked, offline audit anchor, KMS key separation | Med | Audit-chain verify, anchor mismatch | Break-glass review, key custody |
+| T4 | Database compromise | Critical | Low | DB tier | At-rest+column encryption, KMS, least-privilege roles, network segmentation | Med | Integrity verify, DB audit | Rotate keys, restore, notify |
+| T5 | Evidence tampering | Critical | Low | Evidence store | Content-addressed WORM, multi-hash, signed manifests, verify op | Low | `VERIFY EVIDENCE` fail | Quarantine, restore from WORM |
+| T6 | Audit tampering | Critical | Low | Audit store | Append-only, hash chain, seq gaps, signed WORM anchor | Low | `VERIFY AUDIT` fail, anchor mismatch | Investigate, restore anchor |
+| T7 | Insider data exfiltration | High | Med | Export/report paths | Classification-aware export, approval, watermark/sign, export audit, DLP at egress | Med | Export-volume anomaly | Revoke, legal hold, review |
+| T8 | External integration compromise | High | Low-Med | Gateway | Gateway isolation, mTLS, per-connector scope, no direct DB, schema validation, failure isolation | Low | Connector anomaly, schema violations | Disable connector, rotate creds |
+| T9 | SSRF | High | Med | Tracking destinations | Scheme/HTTPS enforce, allowlist, private-IP block, DNS-rebinding re-check | Low | Blocked-request logs | Block, alert, review link |
+| T10 | Open redirect | Med | Med | Tracking endpoint | Destination validation, allowlist, normalization, redirect policy | Low | Redirect-decision logs | Disable link, audit |
+| T11 | Credential theft | High | Med | Auth, secrets | MFA, no secrets in source, KMS, secret scanning, log redaction | Low | Auth anomaly, scan hits | Rotate, revoke |
+| T12 | Cross-case access | High | Med | AuthZ layer | Row-level case/tenant scoping, ABAC, isolation tests | Low | Denied-access audit, isolation test | Alert, review authZ |
+| T13 | Supply-chain compromise | Critical | Low-Med | Dependencies/build | Pinned deps, SBOM, signed artifacts, vuln scan, offline mirror | Med | SBOM diff, signature check | Rebuild from trusted, roll back |
+| T14 | Malicious evidence file | High | Med | Ingestion | Sandboxed ingest, type/size validation, no server-side execution, AV scan | Low | Ingest validation logs | Quarantine, hash, review |
+| T15 | Correlation poisoning | High | Med | Intelligence inputs | Provenance + source reliability weighting, human review, CONTRADICTS edges, no auto-promotion | Med | Confidence/provenance review | Down-weight source, re-review |
+
+**Priority invariants** (decide legal-grade status): T5 evidence integrity, T6 audit integrity, T12
+case isolation, T15/INT-4 no unauthorized/over-confident attribution.
+
+---
+
+## 15. Air-Gapped Deployment
+
+- **No** external CDN/JS/fonts/APIs except via the approved gateway (which may itself be disabled in
+  a fully isolated enclave).
+- **Self-hosted libraries**, offline package repository, local fonts/assets, local documentation,
+  controlled import/export only.
+- **Local trust anchors**: internal CA for TLS/mTLS; **local signing/timestamp strategy** (a TSA/trust
+  anchor for manifests and audit anchoring is an Open Question in air-gapped mode).
+- **Offline updates** via signed, verified bundles; SBOM verified on import.
+- Frontend served as a locally-built static bundle; strict CSP with no external origins.
+
+## 16. Private Cloud Deployment
+
+- Private networking + network segmentation (frontend / API / data / gateway tiers); internal load
+  balancing.
+- Private PostgreSQL (encrypted, PITR), private object storage (WORM-capable for evidence/audit),
+  internal identity provider, secrets manager/KMS, private container registry.
+- Centralized structured logging, metrics, alerting; backup/DR with tested restore.
+- The Integration Gateway is the only segment permitted to egress to approved external systems.
+
+**Topology (both modes):**
+```
+Frontend (static) → API (modular monolith) → { PostgreSQL(PITR) · Evidence WORM · Audit WORM }
+                                            → Integration Gateway segment → Approved external systems
+```
+
+**Reliability (must be proven, not asserted — NFR-4):** `Backup → Restore → Verification → RTO →
+RPO`, with **scheduled restore testing** (a never-restored backup is not a backup). RTO/RPO values
+are Open Questions.
+
+---
+
+## 17. Testing Strategy
+
+Testing pyramid: Unit · Integration · Security · Database Integrity · Evidence Integrity ·
+Chain-of-Custody · Audit Immutability · Authorization · Case Isolation · SSRF · Open Redirect ·
+Import Validation · Regression · E2E · Disaster Recovery · Air-Gap.
+
+**Seven provable tests (release gates — §30):**
+
+| # | Must prove | Test |
 |---|---|---|
-| ADR-0001 | Modular monolith over microservices (first) | Foundational structure & extraction path |
-| ADR-0002 | Module boundary & dependency rules | Enforces isolation, enables later extraction |
-| ADR-0003 | FastAPI + Python 3.12 backend | Baseline runtime |
-| ADR-0004 | PostgreSQL over SQLite | Integrity, concurrency, encryption, PITR |
-| ADR-0005 | Identifier strategy (UUIDv7 / ULID / UUIDv5) | Stable, sortable, collision-resistant; bans `hash()` |
-| ADR-0006 | Content-addressed WORM evidence store + multi-hash + signed manifests | Provable evidence integrity |
-| ADR-0007 | Append-only, hash-chained audit + WORM anchoring | Tamper-evident audit |
-| ADR-0008 | Separate React+Vite frontend, self-hosted (no CDN) | Air-gap, testability, reproducible build |
-| ADR-0009 | Secrets via env (dev) / KMS (prod) | No secrets in source |
-| ADR-0010 | Single Authorized Integration Gateway for all external egress | Contain and audit external contact |
-| ADR-0011 | Short-lived JWT + rotating server-side refresh tokens | Revocable sessions, MFA-ready |
-| ADR-0012 | Provenance envelope as a first-class shared model | Enforces the governing principle universally |
-| ADR-0013 | Semantic tiers (FACT/INTELLIGENCE/CORRELATION/CONCLUSION) with no auto-promotion | Prevents inference-as-fact |
-| ADR-0014 | Mandatory human review before attribution | Legal defensibility of correlation |
-| ADR-0015 | Data classification & retention model | Governance & minimization |
+| 1 | Evidence hash cannot change without detection | Mutate stored bytes → `VERIFY EVIDENCE` returns FAIL, alert raised |
+| 2 | Chain of custody cannot be tampered without detection | Alter/insert/remove a custody event → hash-link verify FAIL at first divergence |
+| 3 | Investigator on Case A cannot access Case B | Attempt cross-case reads/writes as A → denied + audited; automated isolation suite |
+| 4 | Audit event cannot be deleted with application-admin rights | Attempt delete via app admin → blocked (revoked grant); attempt at DB → `VERIFY AUDIT` + anchor mismatch |
+| 5 | Correlation does not auto-become Fact | Create correlation → assert tier stays CORRELATION until an explicit, audited human promotion |
+| 6 | Conflicting geolocation is not hidden | Feed conflicting IP/BSSID/cell → assert `CONFLICT DETECTED` and all results preserved |
+| 7 | External integrations cannot reach the core DB | Static + runtime assertion: only the gateway egresses; connectors have no DB path |
 
-*(An index and skeletons are provided in `docs/adr/`.)*
+E2E scenario (acceptance for the whole pipeline): Create Case → Authorized Collection → Telemetry →
+Enrichment → Correlation → Evidence → Review → Report → Audit Verification.
 
 ---
 
-## 19. Implementation Roadmap
+## 18. Prototype Migration Matrix
 
-Ordered by **risk and dependency**, not by coding ease. Security, provenance, evidence, and audit
-foundations come before features that depend on them.
+Nothing rewritten blindly. (Dispositions are against the *stated* prototype; confirm on source audit.)
 
-| Phase | Name | Focus | Exit criteria |
-|---|---|---|---|
-| **0** | **Discovery** *(this document)* | Requirements, threat model, architecture, ADRs, data model, security model | Architecture **approved** |
-| **1** | Foundation | Repo structure, PostgreSQL, migrations, config, identity, RBAC, logging, **audit foundation** | AuthN/Z + append-only audit working & verifiable |
-| **2** | Case Management | Cases, assignments, lifecycle, authorization, timeline | Full lifecycle enforced & audited |
-| **3** | Collection & Telemetry | Tracking-link architecture, **validated destinations**, ingestion, normalization | SSRF/open-redirect tests pass; telemetry stored with provenance |
-| **4** | Intelligence | IP/ASN/Geo/OSINT adapters, observations, provenance | Enrichment produces tiered observations |
-| **5** | Correlation | Entity resolution, **authorized integration boundary**, confidence, analyst review | Correlation explainable + human-review gate |
-| **6** | Evidence Vault | Artifact storage, hashing, custody events, integrity verification, retention/legal hold | Evidence tamper tests pass; custody reconstructable |
-| **7** | Reporting | Case reports, evidence/audit references, signed/versioned exports | Versioned, signed report from real data |
-| **8** | Enterprise Hardening | Security testing, DR, **backup-restore verification**, deployment, observability, pen-test, ops docs | RTO/RPO demonstrated; pen-test findings closed |
-
-**Sequencing rationale:** audit and identity (Phase 1) underpin everything; evidence and correlation
-(5–6) depend on provenance established in 3–4; hardening (8) validates the whole against real
-adversarial and reliability requirements.
+| Component | KEEP | REFACTOR | REPLACE | REMOVE | Rationale |
+|---|:--:|:--:|:--:|:--:|---|
+| FastAPI | ✅ | | | | Solid async API; reorganize into modules. |
+| SQLite | | | ✅ | | Weak concurrency/integrity/encryption/PITR → PostgreSQL (ADR-001). |
+| React SPA | | ✅ | | | Keep React; extract from Python string into `frontend/` + Vite (ADR-014). |
+| Tailwind (CDN) | | ✅ | | | Keep Tailwind; **self-host** build. Remove the CDN, not Tailwind (air-gap). |
+| Tracking links | | ✅ | | | Keep concept; add destination security (SSRF/redirect), authorization binding, provenance. |
+| Telemetry/events | | ✅ | | | Keep capture; add normalization, provenance, semantic tiers, real store. |
+| Evidence | | | ✅ | | No real vault → content-addressed WORM + hashing + custody (ADR-003/004). |
+| Audit | | | ✅ | | Plain/absent → append-only hash-chained WORM-anchored audit (ADR-005). |
+| Users/RBAC | | ✅ | | | Build real RBAC+ABAC + case/tenant isolation + MFA. |
+| Mock correlation | | | | ✅ | Violates provenance principle → real engine with confidence + provenance + review. |
+| Synthetic telemetry | | | | ✅ | Remove from production paths; keep only as labelled test fixtures. |
+| Single-file packaging | | | ✅ | | Untestable → modular monolith layout. |
 
 ---
 
-## 20. Open Questions & Assumptions
+## 19. ADR List
 
-Per the brief, nothing absent from the source material is silently assumed. Items needing owner
-input before or during Phase 1:
+Full skeletons under [`docs/adr/`](./adr/). Each: context, options, decision, consequences.
 
-### Assumptions
-
-- **ASSUMPTION** — The prototype matches the brief's description (single-file FastAPI + SQLite +
-  CDN-React + mock data). To be **verified** against actual source, which was not present in this
-  repository.
-- **ASSUMPTION** — Python 3.12+ and PostgreSQL 16+ are acceptable baseline versions.
-- **ASSUMPTION** — Evidence artifact volumes are within object-store scale (not petabyte media
-  forensics) for the initial deployment; storage sizing to be confirmed.
-- **ASSUMPTION** — A single operating authority/tenant initially (multi-tenancy is out of scope
-  until raised).
-
-### Open Questions
-
-- **OPEN QUESTION** — Concrete **RTO/RPO** targets and backup retention windows? (Business/legal
-  input.)
-- **OPEN QUESTION** — Which **legal/regulatory regime(s)** govern retention, authorization
-  references, and evidence admissibility? This shapes retention defaults and report content.
-- **OPEN QUESTION** — Which **identity provider** in private-cloud mode (internal IdP protocol:
-  OIDC/SAML/LDAP)? Affects Phase 1 identity design.
-- **OPEN QUESTION** — Which **approved external systems** (IP-intel provider, OSINT sources, telecom
-  integration) are actually available, and under what authorization? Determines which adapters are
-  built in Phases 4–5.
-- **OPEN QUESTION** — Is **WORM-capable object storage** available in the target environment
-  (evidence/audit anchoring depends on it), or must WORM be emulated at the application layer?
-- **OPEN QUESTION** — Expected **user scale / concurrency** and case volume (sizing, indexing, and
-  whether/when module extraction is warranted)?
-- **OPEN QUESTION** — **MFA** method required (TOTP vs WebAuthn/hardware keys) for Phase 1?
-- **OPEN QUESTION** — Signing/timestamping trust anchor for manifests and reports (internal CA vs
-  external TSA in a possibly air-gapped environment)?
-- **OPEN QUESTION** — Data-residency / cross-border constraints on any external correlation results?
+| ADR | Decision |
+|---|---|
+| [ADR-001](./adr/001-postgresql.md) | PostgreSQL as production database |
+| [ADR-002](./adr/002-identifier-strategy.md) | Identifier strategy (UUIDv7 / ULID / UUIDv5; ban `hash()`) |
+| [ADR-003](./adr/003-evidence-integrity.md) | Evidence integrity (content-addressed WORM + multi-hash + signed manifests) |
+| [ADR-004](./adr/004-chain-of-custody.md) | Chain of custody as append-only hash-linked event stream |
+| [ADR-005](./adr/005-immutable-audit.md) | Immutable, tamper-evident audit (hash chain + signed WORM anchor) |
+| [ADR-006](./adr/006-rbac-abac.md) | RBAC + ABAC + case/tenant isolation |
+| [ADR-007](./adr/007-modular-monolith.md) | Modular monolith first |
+| [ADR-008](./adr/008-integration-gateway.md) | Single Authorized Integration Gateway |
+| [ADR-009](./adr/009-phone-intelligence-model.md) | Phone intelligence model (3 authorized paths + fusion) |
+| [ADR-010](./adr/010-geolocation-fusion.md) | Geolocation fusion (3 paths + conflict surfacing) |
+| [ADR-011](./adr/011-semantic-evidence-tiers.md) | Semantic evidence tiers, no auto-promotion |
+| [ADR-012](./adr/012-data-classification.md) | Data classification model |
+| [ADR-013](./adr/013-retention.md) | Retention, legal hold & controlled destruction |
+| [ADR-014](./adr/014-air-gapped-deployment.md) | Air-gapped deployment |
+| [ADR-015](./adr/015-private-cloud-deployment.md) | Private cloud deployment |
 
 ---
 
-*End of Technical Proposal v0.1.0 — awaiting architecture review and approval. No implementation to
-begin until this document is approved.*
+## 20. Risk-Ordered Implementation Roadmap
+
+Ordered by **risk and dependency**, not coding ease. Foundations (security, evidence, custody,
+audit) precede features that depend on them. Aligned to the brief's phase order (§38).
+
+| Phase | Focus | Exit criteria |
+|---|---|---|
+| **0 — Discovery** *(this doc)* | Requirements, threat model, data model, ADRs, security model | **Architecture approved** |
+| **1 — Security Foundation** | Identity, RBAC/ABAC, PostgreSQL, case+tenant isolation, Evidence Vault, Chain of Custody, Immutable Audit | AuthZ + isolation enforced; provable tests 1,2,4,7 pass; audit verifiable |
+| **2 — Case & Evidence Workflows** | Case lifecycle, tracking (validated destinations), evidence workflows, reporting | Lifecycle audited; SSRF/redirect tests pass; re-verifiable report |
+| **3 — Intelligence** | Intelligence, phone intelligence, geolocation, correlation, entity graph | Tiered observations; conflict surfacing (test 6); no auto-promotion (test 5) |
+| **4 — External Integrations** | Authorized Integration Gateway + approved connectors | Gateway isolation proven (test 7); provenance on all external data |
+| **5 — Hardening** | Performance, DR, air-gap, private cloud, compliance validation | RTO/RPO demonstrated; pen-test closed; SBOM + signed artifacts; DR restore tested |
+
+---
+
+## 21. Legal / Compliance Model
+
+- **No jurisdiction assumed** (COMP-1). A **Compliance abstraction** binds later to the actual
+  governing regime: authorization types, retention rules, and report content are configurable
+  policy, not hard-coded law.
+- **ISO/IEC 27037 relevance** (COMP-2): the evidence lifecycle maps to *identification → collection →
+  acquisition → preservation*, with documented handling, integrity, and chain of custody. The
+  platform provides the *mechanisms* (integrity, custody, audit, provenance) that a 27037-aligned
+  process needs — it does not, by itself, guarantee compliance.
+- **Honest limits** (COMP-6): DILIP does **not** claim court-admissibility because a hash exists.
+  Admissibility depends on jurisdiction, procedure, authorization, and the integrity of the entire
+  collection process. The platform's role is to make that process *documentable and verifiable*.
+- **Legal authorizations** are first-class (`legal_authorizations` table): every case, collection,
+  and sensitive integration references an authorization with scope and validity window.
+
+## 22. Data Classification, Retention & Destruction
+
+**Classification (COMP-3, ADR-012):** `PUBLIC · INTERNAL · CONFIDENTIAL · RESTRICTED ·
+HIGHLY_RESTRICTED`, each object declaring its class, driving **access · encryption · export ·
+retention · audit · reporting**.
+
+| Class | Example | Access / handling |
+|---|---|---|
+| PUBLIC | Published OSINT snapshot | Standard |
+| INTERNAL | Case metadata | Authenticated |
+| CONFIDENTIAL | Telemetry, IP-geo | Case-scoped + need-to-know |
+| RESTRICTED | Identifiers, correlations | Supervisor-gated, column encryption |
+| HIGHLY_RESTRICTED | Telecom results, subscriber candidates, legal authorizations | mTLS-only source, strictest need-to-know, column encryption, longest audit |
+
+**Retention & destruction (COMP-4, ADR-013):** retention policies (period + disposition + legal
+basis), case-specific retention, **legal hold** (overrides disposition), archive, **controlled
+destruction with destruction evidence** (who/when/authorization/what, recorded and audited).
+Evidence is **never** deleted by an ad-hoc Delete; disposition runs only after the period, only
+absent a legal hold, and always produces an audited destruction record.
+
+---
+
+## 23. Open Questions
+
+Per §39, answers are **not guessed**. Required before / during Phase 1:
+
+- **Governing legal/regulatory regime** (shapes retention, authorization, report content).
+- **RTO / RPO** targets and backup retention windows.
+- **MFA mechanism** (TOTP vs WebAuthn/hardware keys).
+- **Identity Provider** in private-cloud mode (OIDC / SAML / LDAP).
+- **WORM storage availability** (or must WORM be emulated at the application layer?).
+- **Signing mechanism** and key custody for manifests/reports/audit anchors.
+- **Timestamp authority / air-gapped trust anchor** for integrity attestation.
+- **Approved external intelligence systems**, **telecom data providers**, and **OSINT sources**
+  actually available, and under what authorization (determines Phase 3–4 connectors).
+- **Retention requirements** and **classification levels** mandated by the operating authority.
+- **Deployment topology** (air-gapped vs private cloud vs both; single- vs multi-tenant).
+- **Number of investigators**, **expected case volume**, **evidence volume**, **telemetry volume**
+  (sizing, indexing, extraction decisions).
+- **Backup & Disaster Recovery requirements** (frequency, geographic redundancy, restore SLAs).
+- **Prototype source availability** for a verified Current-State audit.
+
+---
+
+## 24. Architecture Readiness Verdict
+
+### Verdict: **NOT READY — OPEN QUESTIONS REMAIN**
+
+The **architecture itself is complete and internally consistent** for Phase 0: the module boundaries,
+data model, evidence/custody/audit integrity design, semantic-tier discipline, phone/geo three-path
++ fusion models, security model (RBAC+ABAC+case/tenant isolation), threat model, and the 15 ADRs
+form a coherent, buildable foundation that will not require re-architecting the Evidence, Audit, or
+Security models later.
+
+However, per the project's own rule (§38: *"do not start Phase 1 before Phase 0 is approved"*) and
+§39/§40, **Phase 1 cannot responsibly begin** until the following **blocking** questions are
+answered, because they change foundational choices rather than mere configuration:
+
+1. **WORM storage availability** — determines whether evidence/audit immutability is native or
+   application-emulated (affects ADR-003/005 implementation).
+2. **Signing mechanism + timestamp/trust anchor (esp. air-gapped)** — required before manifests and
+   audit anchoring can be built (ADR-003/005/014).
+3. **MFA mechanism + Identity Provider** — foundational to the Phase-1 identity module (ADR-006).
+4. **Governing legal/regulatory regime + retention/classification requirements** — shapes the
+   compliance abstraction, retention defaults, and report content (ADR-012/013, §21).
+5. **Deployment topology + tenancy** (air-gapped vs private cloud, single- vs multi-tenant) —
+   affects isolation, networking, and trust-anchor design (ADR-014/015, SEC-3).
+6. **Prototype source** — for a verified Current-State audit (§2 currently based on description only).
+
+**Non-blocking** questions (RTO/RPO, volumes/sizing, specific approved external systems) can be
+resolved during Phases 1–4 without re-architecting.
+
+**Recommendation:** approve the architecture *in principle*, resolve blocking questions 1–6, then
+re-issue this verdict as **READY FOR PHASE 1**. No implementation begins until that approval is
+recorded.
+
+---
+
+*End of Technical Proposal v0.2.0 — awaiting architecture review and approval. No implementation
+begins until Phase 0 is approved.*
