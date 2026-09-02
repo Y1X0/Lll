@@ -196,3 +196,131 @@ def pulses_from_runs(runs, fs: float) -> list[dict]:
             "gap_seconds": gap_seconds,
         })
     return pulses
+
+
+# =====================================================================
+# CAN Evidence Storage (Phase 3) — معزول تمامًا عن جداول RF أعلاه.
+# جداول captures/pulses_analysis تبقى دون أي مساس.
+# =====================================================================
+
+CAN_SCHEMA = """
+CREATE TABLE IF NOT EXISTS can_captures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    interface TEXT NOT NULL,
+    bitrate INTEGER NOT NULL,
+    dropped_frames INTEGER NOT NULL DEFAULT 0,
+    invalid_frames INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS can_frames (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    capture_id INTEGER NOT NULL,
+    timestamp REAL NOT NULL,
+    can_id INTEGER NOT NULL,
+    is_extended INTEGER NOT NULL CHECK (is_extended IN (0, 1)),
+    dlc INTEGER NOT NULL CHECK (dlc BETWEEN 0 AND 8),
+    payload BLOB NOT NULL,
+    direction TEXT NOT NULL CHECK (direction IN ('RX', 'TX')),
+    interface TEXT NOT NULL,
+    error_status TEXT,
+    FOREIGN KEY (capture_id) REFERENCES can_captures (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_can_frames_capture_id ON can_frames(capture_id);
+CREATE INDEX IF NOT EXISTS idx_can_frames_can_id ON can_frames(can_id);
+"""
+
+
+class CanEvidenceDB:
+    """تخزين أدلّة CAN على SQLite — مستقلّ عن EvidenceDB (RF)، بنفس الملف أو ملف منفصل."""
+
+    def __init__(self, path: str = "can_evidence.db"):
+        self.path = path
+        self.conn = sqlite3.connect(path)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA foreign_keys = ON;")
+        with self.conn:
+            self.conn.executescript(CAN_SCHEMA)
+
+    # --------------------------------------------------------- جلسة الالتقاط
+    def start_session(self, interface: str, bitrate: int, source: str,
+                      timestamp: Optional[str] = None) -> int:
+        ts = timestamp or datetime.now(timezone.utc).isoformat()
+        with self.conn:
+            cur = self.conn.execute(
+                """INSERT INTO can_captures
+                   (timestamp, interface, bitrate, dropped_frames, invalid_frames, source)
+                   VALUES (?, ?, ?, 0, 0, ?)""",
+                (ts, interface, int(bitrate), source),
+            )
+            return int(cur.lastrowid)
+
+    def update_counters(self, capture_id: int, dropped: int, invalid: int) -> None:
+        with self.conn:
+            self.conn.execute(
+                "UPDATE can_captures SET dropped_frames=?, invalid_frames=? WHERE id=?",
+                (int(dropped), int(invalid), capture_id),
+            )
+
+    # --------------------------------------------------------- إدخال الإطارات
+    def insert_frames(self, capture_id: int, frames: Iterable[dict]) -> int:
+        """إدخال دفعة إطارات في معاملة واحدة. يعيد العدد المُدخَل.
+
+        كل إطار dict: timestamp, can_id, is_extended(bool/0-1), dlc,
+        payload(bytes), direction('RX'/'TX'), interface, error_status(اختياري).
+        """
+        rows = []
+        for f in frames:
+            rows.append((
+                capture_id,
+                float(f["timestamp"]),
+                int(f["can_id"]),
+                1 if f["is_extended"] else 0,
+                int(f["dlc"]),
+                bytes(f["payload"]),
+                f["direction"],
+                f["interface"],
+                f.get("error_status"),
+            ))
+        with self.conn:  # ذرّية
+            self.conn.executemany(
+                """INSERT INTO can_frames
+                   (capture_id, timestamp, can_id, is_extended, dlc,
+                    payload, direction, interface, error_status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
+        return len(rows)
+
+    # --------------------------------------------------------- قراءة
+    def get_session(self, capture_id: int) -> Optional[dict]:
+        r = self.conn.execute(
+            "SELECT * FROM can_captures WHERE id=?", (capture_id,)).fetchone()
+        return dict(r) if r else None
+
+    def get_frames(self, capture_id: int) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM can_frames WHERE capture_id=? ORDER BY id", (capture_id,)
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["payload"] = bytes(d["payload"])  # BLOB → bytes
+            out.append(d)
+        return out
+
+    def count(self, table: str) -> int:
+        if table not in ("can_captures", "can_frames"):
+            raise ValueError("جدول CAN غير معروف")
+        return int(self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+
+    def close(self) -> None:
+        self.conn.close()
+
+    def __enter__(self) -> "CanEvidenceDB":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
