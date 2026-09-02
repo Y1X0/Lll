@@ -324,3 +324,110 @@ class CanEvidenceDB:
 
     def __exit__(self, *exc) -> None:
         self.close()
+
+
+# =====================================================================
+# UDS Evidence Storage (Phase 4B) — معزول عن جداول RF/CAN أعلاه.
+# الـ Schema حرفيًا كما اعتمده الـ Architect؛ التنفيذ موائم لنمط القاعدة
+# (اتصال دائم + PRAGMA foreign_keys=ON + start_session) لضمان سلامة الأدلّة.
+# =====================================================================
+
+UDS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS uds_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    ecu_address INTEGER NOT NULL,
+    session_type INTEGER NOT NULL,
+    source TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS uds_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    timestamp REAL NOT NULL,
+    service_id INTEGER NOT NULL,
+    sub_function INTEGER,
+    payload BLOB NOT NULL,
+    direction TEXT NOT NULL CHECK (direction IN ('TX', 'RX')),
+    response_code INTEGER,
+    FOREIGN KEY (session_id) REFERENCES uds_sessions (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_uds_messages_session_id ON uds_messages(session_id);
+"""
+
+
+class UDSEvidenceDB:
+    """تخزين أدلّة جلسات UDS ورسائلها — مستقلّ، مع FK مفعّل (سلامة الأدلّة)."""
+
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self.conn = sqlite3.connect(db_path)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA foreign_keys = ON;")
+        with self.conn:
+            self.conn.executescript(UDS_SCHEMA)
+
+    # --------------------------------------------------------- الجلسة
+    def start_session(self, ecu_address: int, session_type: int, source: str,
+                      timestamp: Optional[str] = None) -> int:
+        """ينشئ جلسة تشخيص ويعيد معرّفها (شرط لأي رسالة — سلامة الأدلّة)."""
+        ts = timestamp or datetime.now(timezone.utc).isoformat()
+        with self.conn:
+            cur = self.conn.execute(
+                """INSERT INTO uds_sessions (timestamp, ecu_address, session_type, source)
+                   VALUES (?, ?, ?, ?)""",
+                (ts, int(ecu_address), int(session_type), source),
+            )
+            return int(cur.lastrowid)
+
+    # --------------------------------------------------------- الرسائل
+    def save_diagnostic_exchange(self, session_id: int, timestamp: float,
+                                 service_id: int, sub_function, payload: bytes,
+                                 direction: str, response_code=None) -> int:
+        """يحفظ رسالة تشخيص (طلب/ردّ) مرتبطة بجلسة. يعيد معرّف الرسالة."""
+        with self.conn:  # معاملة ذرّية
+            cur = self.conn.execute(
+                """INSERT INTO uds_messages
+                   (session_id, timestamp, service_id, sub_function,
+                    payload, direction, response_code)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (int(session_id), float(timestamp), int(service_id),
+                 (None if sub_function is None else int(sub_function)),
+                 bytes(payload), direction,
+                 (None if response_code is None else int(response_code))),
+            )
+            return int(cur.lastrowid)
+
+    # --------------------------------------------------------- قراءة
+    def get_message(self, msg_id: int) -> Optional[dict]:
+        r = self.conn.execute(
+            "SELECT * FROM uds_messages WHERE id=?", (msg_id,)).fetchone()
+        if not r:
+            return None
+        d = dict(r)
+        d["payload"] = bytes(d["payload"])
+        return d
+
+    def get_messages(self, session_id: int) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM uds_messages WHERE session_id=? ORDER BY id", (session_id,)
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r); d["payload"] = bytes(d["payload"]); out.append(d)
+        return out
+
+    def count(self, table: str) -> int:
+        if table not in ("uds_sessions", "uds_messages"):
+            raise ValueError("جدول UDS غير معروف")
+        return int(self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+
+    def close(self) -> None:
+        self.conn.close()
+
+    def __enter__(self) -> "UDSEvidenceDB":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
