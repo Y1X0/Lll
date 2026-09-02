@@ -22,7 +22,8 @@ from can_interface import CanFrame, validate_frame
 from database import UDSEvidenceDB
 
 SID_NEGATIVE = 0x7F
-SUBFUNC_SERVICES = {0x10, 0x3E}   # خدمات تحمل sub-function في البايت الثاني
+SUBFUNC_SERVICES = {0x10, 0x3E, 0x19}   # خدمات تحمل sub-function في البايت الثاني
+# ملاحظة: 0x14 (ClearDTC) لا يحمل sub-function (البايتات 1..3 = مجموعة DTC)
 
 
 @dataclass

@@ -77,3 +77,60 @@ class UDSServer:
             return bytes([SID_TESTER_PRESENT + RESPONSE_SID_OFFSET, 0x00])
         else:
             return bytes([0x7F, SID_TESTER_PRESENT, NRC_SUB_FUNCTION_NOT_SUPPORTED])
+
+
+# =====================================================================
+# Extended UDS Services (DTC Management) — Phase 4C
+# 0x19 ReadDTCInformation · 0x14 ClearDiagnosticInformation
+# =====================================================================
+
+SID_READ_DTC_INFORMATION = 0x19
+SID_CLEAR_DIAGNOSTIC_INFORMATION = 0x14
+
+
+class ExtendedUDSServer(UDSServer):
+    """محاكي ECU موسّع يدعم إدارة رموز الأعطال (DTC) — بيانات اصطناعية للبحث."""
+
+    def __init__(self):
+        super().__init__()
+        # مخزن DTC محاكى: 3 بايت رمز العطل + 1 بايت قناع الحالة (بيانات اصطناعية)
+        # ملاحظة: القيم اصطناعية للاختبار؛ الترميز الدقيق لـ SAE J2012 ليس محلّ تحقّق.
+        self.dtc_store = [
+            b"\x03\x01\x00\x09",  # P0301 (اصطناعي): احتراق خاطئ أسطوانة 1 — نشط/معلّق
+            b"\xC0\x73\x00\x88",  # C0730 (اصطناعي): ناقل اتصالات — مخزّن
+        ]
+
+    def handle_request(self, request_payload: bytes) -> bytes:
+        if not request_payload:
+            return bytes([0x7F, 0x00, NRC_GENERAL_REJECT])
+        sid = request_payload[0]
+        if sid == SID_READ_DTC_INFORMATION:
+            return self._handle_read_dtc(request_payload)
+        elif sid == SID_CLEAR_DIAGNOSTIC_INFORMATION:
+            return self._handle_clear_dtc(request_payload)
+        else:
+            # عُد إلى الخدمات الأساسية (0x10, 0x22, 0x3E) — وأي SID آخر يُرفض NRC 0x11
+            return super().handle_request(request_payload)
+
+    def _handle_read_dtc(self, payload: bytes) -> bytes:
+        if len(payload) < 2:
+            return bytes([0x7F, SID_READ_DTC_INFORMATION, NRC_CONDITIONS_NOT_CORRECT])
+        sub_func = payload[1]
+        if sub_func == 0x02:  # reportDTCByStatusMask
+            # 0x59 + subfunc + statusAvailabilityMask + [DTCs...]
+            response = bytearray([SID_READ_DTC_INFORMATION + RESPONSE_SID_OFFSET, 0x02, 0x00])
+            for dtc in self.dtc_store:
+                response.extend(dtc)
+            return bytes(response)
+        else:
+            return bytes([0x7F, SID_READ_DTC_INFORMATION, NRC_SUB_FUNCTION_NOT_SUPPORTED])
+
+    def _handle_clear_dtc(self, payload: bytes) -> bytes:
+        if len(payload) < 4:
+            return bytes([0x7F, SID_CLEAR_DIAGNOSTIC_INFORMATION, NRC_CONDITIONS_NOT_CORRECT])
+        group_of_dtc = (payload[1] << 16) | (payload[2] << 8) | payload[3]
+        if group_of_dtc == 0xFFFFFF:   # مسح كل المجموعات
+            self.dtc_store.clear()
+            return bytes([SID_CLEAR_DIAGNOSTIC_INFORMATION + RESPONSE_SID_OFFSET])
+        else:
+            return bytes([0x7F, SID_CLEAR_DIAGNOSTIC_INFORMATION, 0x31])  # requestOutOfRange

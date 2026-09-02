@@ -116,6 +116,56 @@ class TestDiagnosticPipeline(unittest.TestCase):
         self.assertEqual(db2.count("uds_sessions"), 1)
         db2.close()
 
+class TestDTCPipeline(unittest.TestCase):
+    """0x19/0x14 عبر المسار الكامل CAN→ISO-TP→UDS→Evidence مع ExtendedUDSServer."""
+
+    def setUp(self):
+        self.db_file = "test_dtc_pipeline.db"
+        if os.path.exists(self.db_file):
+            os.remove(self.db_file)
+
+    def tearDown(self):
+        if os.path.exists(self.db_file):
+            os.remove(self.db_file)
+
+    def test_pipeline_read_dtc_multiframe(self):
+        from uds_services import ExtendedUDSServer
+        with DiagnosticPipeline(self.db_file, ecu=ExtendedUDSServer(), bs=2) as p:
+            res = p.request(b"\x19\x02")            # reportDTCByStatusMask
+            self.assertTrue(res.positive)
+            self.assertEqual(res.response[0], 0x59)
+            self.assertEqual(res.response[1], 0x02)
+            self.assertGreater(res.rx_frames, 1)      # 11 بايت → متعدّد الإطارات
+            # sub-function 0x19 سُجّل في الأدلّة
+            rx = [m for m in p.db.get_messages(res.session_id) if m["direction"] == "RX"][0]
+            self.assertEqual(rx["service_id"], 0x59)
+
+    def test_pipeline_clear_dtc_then_read_empty(self):
+        from uds_services import ExtendedUDSServer
+        ecu = ExtendedUDSServer()
+        with DiagnosticPipeline(self.db_file, ecu=ecu) as p:
+            clr = p.request(b"\x14\xFF\xFF\xFF")   # ClearDiagnosticInformation
+            self.assertTrue(clr.positive)
+            self.assertEqual(clr.response, b"\x54")
+            self.assertEqual(len(ecu.dtc_store), 0)
+            # قراءة بعد المسح → ردّ إيجابي بلا DTCs (الترويسة فقط)
+            rd = p.request(b"\x19\x02")
+            self.assertTrue(rd.positive)
+            self.assertEqual(rd.response, b"\x59\x02\x00")
+
+    def test_pipeline_dtc_evidence_persistence(self):
+        from uds_services import ExtendedUDSServer
+        from database import UDSEvidenceDB
+        with DiagnosticPipeline(self.db_file, ecu=ExtendedUDSServer()) as p:
+            p.request(b"\x19\x02")
+            p.request(b"\x14\xFF\xFF\xFF")
+            sid = p.session_id
+            self.assertEqual(len(p.db.get_messages(sid)), 4)   # جلستان × (TX+RX)
+        db2 = UDSEvidenceDB(self.db_file)
+        self.assertEqual(db2.count("uds_messages"), 4)
+        db2.close()
+
+
 
 if __name__ == "__main__":
     unittest.main()
