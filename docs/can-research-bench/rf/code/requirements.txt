@@ -1,0 +1,6 @@
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+# اختيارية للالتقاط المباشر — واحدة منهما حسب جهازك:
+pyrtlsdr>=0.3.0     ; python_version >= "3.8"   # لـ RTL-SDR
+# SoapySDR يُثبَّت عادةً من مدير الحزم (apt install python3-soapysdr) لـ HackRF وغيره
