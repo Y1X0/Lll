@@ -194,6 +194,83 @@ def test_payload_blob_roundtrip():
     finally:
         os.path.exists(path) and os.unlink(path)
 
+# ------------------------------------------------ 5) توافق فيرموير ESP32 (بايت-لبايت)
+def _firmware_wire_bytes(can_id, is_extended, dlc, payload, direction_byte, ts):
+    """يعيد بايتات PAYLOAD تمامًا كما يبنيها esp32_can_bridge.ino (Big-Endian)."""
+    import struct
+    body = b""
+    body += struct.pack(">d", ts)              # timestamp double BE (كما يرسله الفيرموير)
+    body += struct.pack(">I", can_id)          # can_id uint32 BE
+    body += bytes([1 if is_extended else 0])   # is_extended
+    body += bytes([dlc])                       # dlc
+    body += bytes([direction_byte])            # direction (0=RX) — الحقل المُصحَّح
+    body += bytes(payload)                     # payload
+    return body
+
+
+def test_firmware_wire_layout_parses_on_host():
+    """يعيد بناء رزمة كما يرسلها الفيرموير المصحّح، ويتأكّد أن Host يفكّها صحيحة."""
+    import struct
+    from can_interface import START_BYTE, crc16_ccitt
+    payload_bytes = b"\x11\x22\x33"
+    body = _firmware_wire_bytes(0x2EF, False, 3, payload_bytes, 0, 12.5)
+    assert len(body) == 15 + 3, "ترويسة 15 بايت + الحمولة (بعد إضافة direction)"
+    crc = crc16_ccitt(body)
+    packet = bytes([START_BYTE]) + struct.pack(">H", len(body)) + body + struct.pack(">H", crc)
+
+    parser = PacketParser()
+    frames = parser.feed(packet)
+    assert len(frames) == 1, "يجب فكّ إطار واحد صحيح"
+    f = frames[0]
+    assert f.can_id == 0x2EF and f.dlc == 3 and f.payload == payload_bytes
+    assert f.is_extended is False and f.direction == "RX"
+    assert abs(f.timestamp - 12.5) < 1e-9, "timestamp يُفكّ كـ double صحيح"
+    assert parser.framing_errors == 0
+
+
+def test_firmware_wrong_layout_would_fail():
+    """يثبت أن الأخطاء الثلاثة في فيرموير الـ Architect الأصلي تُنتج فكًّا خاطئًا."""
+    import struct
+    from can_interface import START_BYTE, crc16_ccitt
+    # الخطأ: little-endian + timestamp uint64 + بلا direction (النسخة الأصلية)
+    bad = b""
+    bad += struct.pack("<Q", 1234567)          # ts كعدد صحيح little-endian
+    bad += struct.pack("<I", 0x2EF)            # can_id little-endian
+    bad += bytes([0, 3])                       # ext, dlc  (بلا direction)
+    bad += b"\x11\x22\x33"
+    crc = crc16_ccitt(bad)
+    packet = bytes([START_BYTE]) + struct.pack(">H", len(bad)) + bad + struct.pack(">H", crc)
+    parser = PacketParser()
+    frames = parser.feed(packet)
+    # سيُفكّ لكن بقيم خاطئة (can_id/dlc/payload مزاحة) — نثبت عدم التطابق
+    if frames:
+        assert not (frames[0].can_id == 0x2EF and frames[0].payload == b"\x11\x22\x33"), \
+            "التنسيق الخاطئ يجب ألا يعطي القيم الصحيحة"
+
+
+def test_serial_glue_selftest():
+    """جسر الـ Host (process_stream) يبتلع بايتات محاكاة بلا عتاد."""
+    import io, os, tempfile
+    from serial_capture import process_stream
+    from can_interface import build_packet, CanFrame
+    frames = [CanFrame(can_id=0x300 + i, dlc=(i % 9), payload=bytes(range(i % 9)),
+                       direction="RX", interface="usb0", timestamp=float(i))
+              for i in range(25)]
+    stream = io.BytesIO(b"".join(build_packet(f) for f in frames))
+    def read_chunk():
+        b = stream.read(5)
+        return b if b else None
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd); os.unlink(path)
+    try:
+        db = CanEvidenceDB(path)
+        m = process_stream(read_chunk, db, "usb0", 500000, "selftest")
+        assert m["stored_frames"] == 25 and m["dropped_frames"] == 0
+        assert m["framing_errors"] == 0
+        db.close()
+    finally:
+        os.path.exists(path) and os.unlink(path)
+
+
 
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
