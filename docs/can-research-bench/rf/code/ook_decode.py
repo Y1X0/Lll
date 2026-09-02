@@ -201,6 +201,9 @@ def main():
     ap.add_argument("--cutoff", type=float, default=None, help="قطع المرشّح المنخفض (Hz)")
     ap.add_argument("--decim", type=int, default=1, help="تقليل العيّنات (decimation)")
     ap.add_argument("--report", action="store_true", help="طباعة تقرير مفصّل")
+    ap.add_argument("--db", default=None,
+                    help="حفظ النتائج في قاعدة SQLite للأدلّة (بجانب أي JSON)")
+    ap.add_argument("--source", default="rtl-sdr", help="مصدر الالتقاط (للسجلّ)")
     args = ap.parse_args()
 
     iq = load_iq(args.iqfile, args.fmt)
@@ -230,6 +233,21 @@ def main():
     if bits:
         preview = "".join(str(b) for b in bits[:64])
         print(f"[+] معاينة البتات: {preview}")
+
+    if args.db:
+        # حفظ الأدلّة في SQLite دون التأثير على التحليل — طبقة مستقلّة
+        from database import EvidenceDB, pulses_from_runs
+        pulses = pulses_from_runs(runs, fs)
+        with EvidenceDB(args.db) as db:
+            cid = db.save_analysis(
+                file_path=args.iqfile,
+                sample_rate=fs,
+                sample_format=args.fmt if args.fmt != "auto" else "complex64",
+                num_samples=int(iq.size),
+                source=args.source,
+                pulses=pulses,
+            )
+        print(f"[+] حُفظت الأدلّة في {args.db}  (capture_id={cid}, نبضات={len(pulses)})")
 
     if args.report and runs:
         print("\n--- أطول 12 نبضة (level, µs) ---")
