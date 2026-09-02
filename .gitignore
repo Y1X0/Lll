@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# RF evidence databases (بيانات تشغيل محلية — لا تُلتزم)
+*.db
+*.sqlite
+*.sqlite3
+
+# SDR raw captures (كبيرة، محلية، وقد تحوي بيانات مختبر)
+*.iq
+*.raw
+*.cu8
+*.cs8
