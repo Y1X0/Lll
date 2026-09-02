@@ -20,7 +20,10 @@ ook_decode.py — فكّ تضمين OOK/ASK كامل من ملف IQ خام إل�
     python ook_decode.py signal.iq --rate 2.048e6 --report
 """
 import argparse
+import json
 import sys
+from datetime import datetime, timezone
+
 import numpy as np
 from scipy import signal as sig
 
@@ -193,6 +196,37 @@ def find_preamble(bits, min_run=8):
 
 
 # ------------------------------------------------------------------ CLI
+def build_analysis_result(file_path, sample_format, num_samples, source,
+                          fs, thr, runs, sym, bits, coding, pre, pulses,
+                          timestamp):
+    """
+    يبني كائن AnalysisResult موحّدًا يُغذّي JSON و SQLite معًا (مصدر حقيقة واحد).
+    كتلة `capture` تطابق مخطّط جدول captures حرفيًا لضمان اتساق JSON ↔ DB.
+    """
+    return {
+        "capture": {
+            "file_path": file_path,
+            "timestamp": timestamp,
+            "sample_rate": float(fs),
+            "sample_format": sample_format,
+            "num_samples": int(num_samples),
+            "duration": float(num_samples) / float(fs) if fs else 0.0,
+            "source": source,
+        },
+        "decode": {
+            "threshold": float(thr),
+            "num_pulses": len(runs),
+            "symbol_seconds": (float(sym) if sym else None),
+            "baud_estimate": (round(1.0 / sym, 2) if sym else None),
+            "coding": coding,
+            "num_bits": len(bits),
+            "preamble_index": (int(pre) if pre >= 0 else None),
+            "bits": "".join(str(b) for b in bits),
+        },
+        "pulses": pulses,
+    }
+
+
 def main():
     ap = argparse.ArgumentParser(description="فكّ تضمين OOK/ASK من ملف IQ (استقبال فقط)")
     ap.add_argument("iqfile")
@@ -203,6 +237,8 @@ def main():
     ap.add_argument("--report", action="store_true", help="طباعة تقرير مفصّل")
     ap.add_argument("--db", default=None,
                     help="حفظ النتائج في قاعدة SQLite للأدلّة (بجانب أي JSON)")
+    ap.add_argument("--json", dest="json_out", default=None,
+                    help="تصدير AnalysisResult إلى ملف JSON")
     ap.add_argument("--source", default="rtl-sdr", help="مصدر الالتقاط (للسجلّ)")
     args = ap.parse_args()
 
@@ -234,20 +270,35 @@ def main():
         preview = "".join(str(b) for b in bits[:64])
         print(f"[+] معاينة البتات: {preview}")
 
-    if args.db:
-        # حفظ الأدلّة في SQLite دون التأثير على التحليل — طبقة مستقلّة
-        from database import EvidenceDB, pulses_from_runs
+    # مصدر حقيقة واحد لـ JSON و SQLite: نفس النبضات ونفس الطابع الزمني
+    if args.json_out or args.db:
+        from database import pulses_from_runs
+        sample_format = args.fmt if args.fmt != "auto" else "complex64"
+        timestamp = datetime.now(timezone.utc).isoformat()
         pulses = pulses_from_runs(runs, fs)
-        with EvidenceDB(args.db) as db:
-            cid = db.save_analysis(
-                file_path=args.iqfile,
-                sample_rate=fs,
-                sample_format=args.fmt if args.fmt != "auto" else "complex64",
-                num_samples=int(iq.size),
-                source=args.source,
-                pulses=pulses,
-            )
-        print(f"[+] حُفظت الأدلّة في {args.db}  (capture_id={cid}, نبضات={len(pulses)})")
+        result = build_analysis_result(
+            file_path=args.iqfile, sample_format=sample_format,
+            num_samples=int(iq.size), source=args.source, fs=fs, thr=thr,
+            runs=runs, sym=sym, bits=bits, coding=coding, pre=pre,
+            pulses=pulses, timestamp=timestamp,
+        )
+
+        if args.json_out:
+            with open(args.json_out, "w", encoding="utf-8") as fh:
+                json.dump(result, fh, ensure_ascii=False, indent=2)
+            print(f"[+] صُدّر JSON إلى {args.json_out}  (نبضات={len(pulses)})")
+
+        if args.db:
+            # طبقة SQLite مستقلّة — تستهلك نفس الكائن الموحّد (طابع زمني متطابق مع JSON)
+            from database import EvidenceDB
+            cap = result["capture"]
+            with EvidenceDB(args.db) as db:
+                cid = db.save_analysis(
+                    file_path=cap["file_path"], sample_rate=cap["sample_rate"],
+                    sample_format=cap["sample_format"], num_samples=cap["num_samples"],
+                    source=cap["source"], pulses=pulses, timestamp=cap["timestamp"],
+                )
+            print(f"[+] حُفظت الأدلّة في {args.db}  (capture_id={cid}, نبضات={len(pulses)})")
 
     if args.report and runs:
         print("\n--- أطول 12 نبضة (level, µs) ---")

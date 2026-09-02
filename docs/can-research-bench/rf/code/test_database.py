@@ -180,6 +180,56 @@ def test_json_output_compatibility():
 
 
 # ---------------------------------------------- تشغيل مباشر بلا pytest
+
+
+# ---------------------------------- JSON export (إغلاق فجوة Phase 2)
+def test_json_export_and_db_consistency():
+    """AnalysisResult يُصدَّر JSON ويتطابق مع صفوف SQLite لنفس الطابع الزمني."""
+    from datetime import datetime, timezone
+    from database import pulses_from_runs
+    from ook_decode import build_analysis_result
+
+    path = _tmp_db()
+    jpath = path + ".json"
+    try:
+        iq, fs = _synthetic_ook()
+        pulses, fs2 = _decode_to_pulses(iq, fs)
+        # أعد اشتقاق مدخلات build كما في main
+        mag, _ = envelope(iq, fs)
+        thr = adaptive_threshold(mag)
+        runs = run_lengths(binarize(mag, thr))
+        ts = datetime.now(timezone.utc).isoformat()
+        result = build_analysis_result(
+            "synthetic_demo", "complex64", iq.size, "synthetic",
+            fs2, thr, runs, None, [1, 0, 1], "NRZ (quantized)", -1,
+            pulses_from_runs(runs, fs2), ts)
+
+        # اكتب JSON واقرأه
+        with open(jpath, "w", encoding="utf-8") as fh:
+            json.dump(result, fh, ensure_ascii=False)
+        with open(jpath, encoding="utf-8") as fh:
+            back = json.load(fh)
+        assert back["capture"]["timestamp"] == ts
+        assert back["capture"]["file_path"] == "synthetic_demo"
+        assert "bits" in back["decode"]
+        assert len(back["pulses"]) == len(result["pulses"])
+
+        # خزّن في DB بنفس الطابع الزمني وتأكّد التطابق
+        db = EvidenceDB(path)
+        cap = result["capture"]
+        cid = db.save_analysis(cap["file_path"], cap["sample_rate"],
+                               cap["sample_format"], cap["num_samples"],
+                               cap["source"], result["pulses"], timestamp=cap["timestamp"])
+        row = db.get_capture(cid)
+        assert row["timestamp"] == back["capture"]["timestamp"], "JSON و DB بنفس الطابع الزمني"
+        assert row["file_path"] == back["capture"]["file_path"]
+        assert db.count("pulses_analysis") == len(back["pulses"])
+        db.close()
+    finally:
+        for p in (path, jpath):
+            os.path.exists(p) and os.unlink(p)
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0
