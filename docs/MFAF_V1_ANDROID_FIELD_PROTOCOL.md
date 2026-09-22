@@ -106,3 +106,28 @@ python3 -m mfaf.cli --db $DB timeline show --case CASE-2026-A1
 Steps A–G and commands 3–5 require an **owned/authorized Android device** and are
 **NOT VERIFIED** in the AI environment. Provide the completed
 `my_v1_results.json`; it will be imported and the report regenerated from real data.
+
+---
+
+## Persistence & reporting (added)
+- **`v1_imports` table** (SQLite, FK→cases, `ON DELETE CASCADE`) persists every import
+  as an **append-only** row: `import_id, case_id, imported_at, imported_by,
+  schema_version, declared_status, effective_status, observations(JSON), metrics(JSON),
+  notes(JSON), limitations(JSON), source_file, document(JSON provenance)`.
+- **Multiple imports are non-destructive:** each `v1 import` adds a new row; prior rows
+  are never overwritten. `report generate` shows the **latest** import plus an
+  **import history** list.
+- **declared vs effective status** are both stored and shown. The importer's existing
+  rules are unchanged: `NOT_VERIFIED` never auto-becomes `VERIFIED`; a `COMPLETED` claim
+  with no observations/measured metrics is downgraded to `PARTIAL`; any status containing
+  "VERIFIED" is rejected at validation.
+- **Report section "4.2 V1 Physical Android Validation"** renders the actual stored
+  values. Missing optional values render as **`NOT RECORDED`** (an empty field is never
+  treated as PASS). User-controlled text (observations/notes/limitations) is
+  Markdown-escaped to prevent report injection.
+- **CLI (unchanged syntax):**
+  `python3 -m mfaf.cli --db mfaf.db v1 import --file my_v1_results.json --case CASE-2026-A1`
+
+> **V1 physical validation remains NOT_VERIFIED until real authorized Android field
+> observations are imported and evaluated.** The platform never claims physical
+> acquisition was tested and never fabricates hardware results.

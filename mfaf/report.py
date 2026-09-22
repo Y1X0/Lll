@@ -48,6 +48,8 @@ class ReportGenerator:
                          "integrity_status": e["integrity_status"],
                          "sha256": e["sha256"]} for e in evidence]
 
+        v1_section = self._collect_v1(case_id)
+
         findings = self._derive_findings(evidence, acqs, auth_events, chain_status)
 
         return {
@@ -59,6 +61,7 @@ class ReportGenerator:
                 "3_devices": devices,
                 "4_authorization": {"legal_authority": case.get("legal_authority"),
                                     "note": "مُدخَل يدويًا من الفاحص؛ المنصّة لا تخترع تفويضًا"},
+                "4_2_v1_field_validation": v1_section,
                 "5_acquisition_method": [{"provider": a["provider"], "status": a["status"],
                                           "reason": a["reason"]} for a in acqs],
                 "6_acquisition_results": acqs,
@@ -83,6 +86,8 @@ class ReportGenerator:
                 **timeline_metrics(timeline),
                 "authentication_event_count": len(auth_events),
                 "chain_of_custody_valid": chain_status["valid"],
+                "v1_latest_status": v1_section["latest_status"],
+                "v1_import_count": v1_section["import_count"],
             },
         }
 
@@ -118,6 +123,117 @@ class ReportGenerator:
             lim.append("NOT VERIFIED — PHYSICAL DEVICE REQUIRED لمزوّدي Android/iOS الحقيقيين")
         return lim
 
+    @staticmethod
+    def _md_escape(value):
+        """يحيّد نصًّا يتحكّم به المستخدم كي لا يكسر بنية Markdown/HTML."""
+        if value is None:
+            return "NOT RECORDED"
+        text = str(value)
+        # إزالة أسطر جديدة (تمنع عناوين/جداول مزيّفة) + هروب محارف البنية
+        text = text.replace("\r", " ").replace("\n", " ")
+        for ch in ("\\", "`", "|", "<", ">", "#", "*", "_", "[", "]"):
+            text = text.replace(ch, "\\" + ch)
+        return text.strip() or "NOT RECORDED"
+
+    def _collect_v1(self, case_id) -> dict:
+        """يجمع قسم V1 من سجلّات الاستيراد المخزّنة (الأحدث + التاريخ)."""
+        imports = self.db.list_v1_imports(case_id)
+        latest = self.db.get_latest_v1_import(case_id)
+        if not latest:
+            return {"latest_status": "NOT_VERIFIED", "import_count": 0,
+                    "latest": None, "history": [],
+                    "note": "V1 physical validation NOT_VERIFIED — no authorized field data imported"}
+        doc = latest.get("document", {})
+        return {
+            "latest_status": latest["effective_status"],
+            "import_count": len(imports),
+            "latest": {
+                "import_id": latest["import_id"],
+                "imported_at": latest["imported_at"],
+                "imported_by": latest["imported_by"],
+                "schema_version": latest["schema_version"],
+                "declared_status": latest["declared_status"],
+                "effective_status": latest["effective_status"],
+                "observations": latest["observations"],
+                "acquisitions": doc.get("acquisitions", []),
+                "integrity_checks": doc.get("integrity_checks", []),
+                "device": doc.get("device", {}),
+                "metrics": latest["metrics"],
+                "notes": latest["notes"],
+                "limitations": latest["limitations"],
+                "provenance": {"source_file": latest.get("source_file")},
+            },
+            "history": [{"import_id": i["import_id"], "imported_at": i["imported_at"],
+                         "declared_status": i["declared_status"],
+                         "effective_status": i["effective_status"]} for i in imports],
+        }
+
+    def _render_v1_markdown(self, v1) -> list:
+        E = self._md_escape
+        out = ["", "## 4.2 V1 Physical Android Validation"]
+        if not v1["latest"]:
+            out += [f"- **Latest status:** {v1['latest_status']}",
+                    "- **[OBSERVED FACT]** No authorized field data imported.",
+                    "- **[LIMITATION]** NOT RECORDED — physical device required.",
+                    "- Device identification: NOT RECORDED",
+                    "- USB observation: NOT RECORDED",
+                    "- Authorized acquisition: NOT RECORDED",
+                    "- Evidence integrity: NOT RECORDED",
+                    "- Timeline: NOT RECORDED",
+                    "- Repeatability: NOT RECORDED"]
+            return out
+        L = v1["latest"]
+        out += [f"- **Latest effective status:** {E(L['effective_status'])}  "
+                f"(declared: {E(L['declared_status'])})",
+                f"- **Imported at:** {E(L['imported_at'])} · schema: {E(L['schema_version'])}",
+                f"- **Import count (history):** {v1['import_count']}"]
+        out += ["", "**Observations (OBSERVED FACT):**"]
+        if L["observations"]:
+            for o in L["observations"]:
+                t = E(o.get("type", "?")) if isinstance(o, dict) else "?"
+                txt = E(o.get("observation", o)) if isinstance(o, dict) else E(o)
+                out.append(f"- [{t}] {txt}")
+        else:
+            out.append("- NOT RECORDED")
+        out += ["", "**Acquisition observations:**"]
+        if L["acquisitions"]:
+            for a in L["acquisitions"]:
+                out.append(f"- {E(a.get('provider'))}: **{E(a.get('status'))}** "
+                           f"({E(a.get('reason'))})" if isinstance(a, dict) else f"- {E(a)}")
+        else:
+            out.append("- NOT RECORDED")
+        out += ["", "**Integrity observations:**"]
+        if L["integrity_checks"]:
+            for c in L["integrity_checks"]:
+                out.append(f"- {E(c.get('evidence_id'))}: {E(c.get('result'))}"
+                           if isinstance(c, dict) else f"- {E(c)}")
+        else:
+            out.append("- NOT RECORDED")
+        out += ["", "**Metrics (true/false/NOT RECORDED):**"]
+        metric_keys = ["device_identification_success", "usb_observation_success",
+                       "authorized_acquisition_available", "evidence_hash_verified",
+                       "timeline_reconstructed", "repeatability_runs",
+                       "repeatability_consistent", "unexpected_behavior"]
+        m = L["metrics"] or {}
+        for k in metric_keys:
+            v = m.get(k, None)
+            out.append(f"- {k}: {'NOT RECORDED' if v is None else E(v)}")
+        out += ["", "**Notes:** " + E(L["notes"])]
+        out += ["", "**Limitations:**"]
+        if L["limitations"]:
+            for lim in L["limitations"]:
+                out.append(f"- {E(lim)}")
+        else:
+            out.append("- NOT RECORDED")
+        out += [f"", f"**Provenance:** source_file="
+                f"{E(L['provenance'].get('source_file'))}"]
+        if v1["history"]:
+            out += ["", "**Import history:**"]
+            for h in v1["history"]:
+                out.append(f"- {E(h['import_id'])} @ {E(h['imported_at'])}: "
+                           f"{E(h['effective_status'])}")
+        return out
+
     def render_json(self, case_id) -> str:
         return json.dumps(self.collect(case_id), indent=2, ensure_ascii=False)
 
@@ -139,6 +255,7 @@ class ReportGenerator:
         md += ["", "## 4. Authorization / Reference",
                f"- {s['4_authorization']['legal_authority'] or '(not provided)'}",
                f"- _{s['4_authorization']['note']}_", ""]
+        md += self._render_v1_markdown(s["4_2_v1_field_validation"])
         md += ["## 5–6. Acquisition"]
         for a in s["6_acquisition_results"]:
             md.append(f"- {a['provider']}: **{a['status']}**"

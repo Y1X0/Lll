@@ -148,14 +148,24 @@ def import_v1(db, file_path: str, case_id: str, actor: str = "examiner",
         "case_id": case_id,
         "imported_at": M.utcnow(),
         "imported_by": actor,
+        "schema_version": doc.get("environment", {}).get("mfaf_version", "V1"),
         "declared_status": doc["status"],
         "effective_status": effective,
         "source_file": file_path,
+        "observations": doc["observations"],
+        "acquisitions": doc["acquisitions"],
+        "evidence": doc["evidence"],
+        "integrity_checks": doc["integrity_checks"],
+        "limitations": doc["limitations"],
+        "notes": doc.get("notes"),
         "observation_count": len(doc["observations"]),
         "acquisition_count": len(doc["acquisitions"]),
         "evidence_count": len(doc["evidence"]),
         "timeline_events_created": timeline_created,
         "metrics": doc.get("metrics", {}),
-        "original_document": doc,   # محفوظ حرفيًا (الملاحظات الأصلية)
+        "document": doc,            # مستند كامل محفوظ حرفيًا (provenance)
+        "original_document": doc,   # توافق خلفي مع الاستدعاءات القائمة
     }
+    # حفظ السجلّ في القاعدة (append-only) — لا يقيّد V1 كناجح
+    db.add_v1_import(import_record)
     return import_record

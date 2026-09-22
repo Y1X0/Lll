@@ -17,7 +17,7 @@ from .errors import IntegrityError, NotFoundError
 from . import models as M
 from . import validation as V
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -177,10 +177,29 @@ CREATE TABLE IF NOT EXISTS reports (
     FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS v1_imports (
+    seq             INTEGER PRIMARY KEY AUTOINCREMENT,
+    import_id       TEXT NOT NULL UNIQUE,
+    case_id         TEXT NOT NULL,
+    imported_at     TEXT NOT NULL,
+    imported_by     TEXT NOT NULL,
+    schema_version  TEXT NOT NULL,
+    declared_status TEXT NOT NULL,
+    effective_status TEXT NOT NULL,
+    observations    TEXT NOT NULL,   -- validated JSON
+    metrics         TEXT NOT NULL,   -- validated JSON
+    notes           TEXT,            -- JSON or NULL
+    limitations     TEXT NOT NULL,   -- validated JSON
+    source_file     TEXT,
+    document        TEXT NOT NULL,   -- full validated JSON document (provenance)
+    FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_evidence_case ON evidence(case_id);
 CREATE INDEX IF NOT EXISTS idx_timeline_case ON timeline_events(case_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_auth_experiment ON authentication_events(experiment_id, attempt_number);
 CREATE INDEX IF NOT EXISTS idx_coc_case ON chain_of_custody_events(case_id, seq);
+CREATE INDEX IF NOT EXISTS idx_v1_case ON v1_imports(case_id, seq);
 """
 
 
@@ -197,7 +216,8 @@ class MFAFDatabase:
         with self.conn:
             self.conn.executescript(SCHEMA)
             self.conn.execute(
-                "INSERT OR IGNORE INTO schema_meta(key,value) VALUES('version',?)",
+                "INSERT INTO schema_meta(key,value) VALUES('version',?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (str(SCHEMA_VERSION),))
 
     # ---------------------------------------------------------- examiners
@@ -411,6 +431,50 @@ class MFAFDatabase:
             self.conn.execute(
                 "INSERT INTO reports(report_id,case_id,format,storage_path,created_at) "
                 "VALUES(?,?,?,?,?)", (report_id, case_id, fmt, path, M.utcnow()))
+
+    # ---------------------------------------------------------- v1 imports
+    def add_v1_import(self, record: dict) -> str:
+        """يحفظ سجلّ استيراد V1 (append-only). JSON مُتحقَّق مسبقًا، SQL معلّم."""
+        import json as _json
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO v1_imports(import_id,case_id,imported_at,imported_by,"
+                "schema_version,declared_status,effective_status,observations,metrics,"
+                "notes,limitations,source_file,document) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (record["import_id"], record["case_id"], record["imported_at"],
+                 record["imported_by"], str(record["schema_version"]),
+                 record["declared_status"], record["effective_status"],
+                 _json.dumps(record.get("observations", []), ensure_ascii=False, sort_keys=True),
+                 _json.dumps(record.get("metrics", {}), ensure_ascii=False, sort_keys=True),
+                 (None if record.get("notes") is None
+                  else _json.dumps(record["notes"], ensure_ascii=False)),
+                 _json.dumps(record.get("limitations", []), ensure_ascii=False, sort_keys=True),
+                 record.get("source_file"),
+                 _json.dumps(record.get("document", {}), ensure_ascii=False, sort_keys=True)))
+        return record["import_id"]
+
+    def _row_to_v1(self, r) -> dict:
+        import json as _json
+        d = dict(r)
+        for k in ("observations", "metrics", "limitations", "document"):
+            d[k] = _json.loads(d[k]) if d.get(k) else ([] if k != "document" and k != "metrics" else ({} if k in ("metrics", "document") else []))
+        d["notes"] = _json.loads(d["notes"]) if d.get("notes") else None
+        return d
+
+    def list_v1_imports(self, case_id: str) -> list:
+        rows = self.conn.execute(
+            "SELECT * FROM v1_imports WHERE case_id=? ORDER BY seq", (case_id,)).fetchall()
+        return [self._row_to_v1(r) for r in rows]
+
+    def get_latest_v1_import(self, case_id: str):
+        r = self.conn.execute(
+            "SELECT * FROM v1_imports WHERE case_id=? ORDER BY seq DESC LIMIT 1",
+            (case_id,)).fetchone()
+        return self._row_to_v1(r) if r else None
+
+    def count_v1_imports(self, case_id: str) -> int:
+        return int(self.conn.execute(
+            "SELECT COUNT(*) FROM v1_imports WHERE case_id=?", (case_id,)).fetchone()[0])
 
     def close(self):
         self.conn.close()

@@ -80,6 +80,10 @@ Evidence, Hash, Timeline, Chain of Custody, Experiment, Limitations — وسلس
 | Repeatability | NOT VERIFIED |
 
 لا قيم ملفّقة. بعد استيراد بيانات الفاحص، يُعاد توليد هذا الجدول من الـ dataset الفعلي.
+> **Update:** `report generate` now includes a **V1 Physical Android Validation**
+> section sourced from persisted `v1_imports` rows (latest + history). With no imports it
+> renders every V1 measurement as `NOT RECORDED` / `NOT_VERIFIED` — no fabricated values.
+
 حالات V1 الصريحة: `NOT_VERIFIED → IN_PROGRESS → COMPLETED | PARTIAL | FAILED`.
 «تنفيذ البروتوكول» ≠ «تأكيد الفرضية». `null` في المقاييس = لم يُرصد/لم يُقَس (ليست false).
 

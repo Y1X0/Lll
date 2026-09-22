@@ -40,7 +40,7 @@ DEVICE → IDENTIFICATION → CASE → AUTHORIZED ACQUISITION → EVIDENCE PRESE
 context manager، unittest، بلا اعتماديات) كنظام فرعي معزول في `mfaf/` — بلا اقتران
 ببنش CAN/RF.
 
-## Database (11 tables)
+## Database (12 tables)
 examiners · cases · devices · acquisitions · evidence · evidence_hashes ·
-experiments · authentication_events · timeline_events · chain_of_custody_events · reports.
+experiments · authentication_events · timeline_events · chain_of_custody_events · reports · **v1_imports** (append-only V1 field import records).
 كل الجداول بقيود CHECK وFK وفهارس. سلسلة العهدة append-only مع ربط تجزئة.

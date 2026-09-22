@@ -28,10 +28,12 @@ class TestReport(unittest.TestCase):
         AuthenticationHarness(self.db, self.cust).run_experiment(
             "EXP-1", dev, [f"w{i}" for i in range(6)])
 
-    def test_report_json_has_16_sections(self):
+    def test_report_has_all_sections_incl_v1(self):
         self._populate()
         d = ReportGenerator(self.db).collect("CASE-T")
-        self.assertEqual(len(d["sections"]), 16)
+        # 16 الأساسية + قسم V1 الميداني = 17
+        self.assertEqual(len(d["sections"]), 17)
+        self.assertIn("4_2_v1_field_validation", d["sections"])
         self.assertTrue(d["metrics"]["chain_of_custody_valid"])
 
     def test_report_distinguishes_fact_interpretation_limitation(self):
