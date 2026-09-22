@@ -1,0 +1,93 @@
+{
+  "platform": "MFAF",
+  "version": "0.1.0",
+  "generated_at": "2026-09-22T03:49:39.704556+00:00",
+  "v1_physical_android": {
+    "id": "V1",
+    "name": "Physical Android acquisition",
+    "status": "NOT_VERIFIED_PHYSICAL_DEVICE_REQUIRED",
+    "executed": false,
+    "note": "لا جهاز فعلي في بيئة التنفيذ؛ راجع البروتوكول اليدوي في MFAF_VALIDATION_REPORT.md"
+  },
+  "checks": [
+    {
+      "id": "V2",
+      "name": "Evidence Integrity",
+      "passed": true,
+      "sha256": "f0d9afbd7000afb1…",
+      "results": {
+        "pristine": "VERIFIED",
+        "tampered": "MISMATCH",
+        "removed": "MISSING"
+      },
+      "expected": {
+        "pristine": "VERIFIED",
+        "tampered": "MISMATCH",
+        "removed": "MISSING"
+      }
+    },
+    {
+      "id": "V3",
+      "name": "Chain of Custody Tamper-Evidence",
+      "passed": true,
+      "results": {
+        "before_tamper": {
+          "valid": true,
+          "count": 5,
+          "broken_at": null
+        },
+        "after_tamper": {
+          "valid": false,
+          "count": 5,
+          "broken_at": 2
+        }
+      }
+    },
+    {
+      "id": "V4",
+      "name": "Repeatability (determinism)",
+      "passed": true,
+      "iterations": 3,
+      "results": {
+        "unique_result_digests": 1,
+        "latency_identical": true,
+        "sample_latency": [
+          5.0,
+          5.0,
+          30.0,
+          55.0,
+          80.0,
+          180.0
+        ],
+        "lockout_detected": true
+      }
+    },
+    {
+      "id": "V5",
+      "name": "Report Completeness",
+      "passed": true,
+      "results": {
+        "sections_present": {
+          "Case": true,
+          "Examiner": true,
+          "Device": true,
+          "Authorization": true,
+          "Acquisition": true,
+          "Evidence": true,
+          "Hash": true,
+          "Timeline": true,
+          "ChainOfCustody": true,
+          "Experiment": true,
+          "Limitations": true
+        },
+        "chain_valid": true,
+        "not_available_reported": true
+      }
+    }
+  ],
+  "summary": {
+    "executed_checks": 4,
+    "passed": 4,
+    "all_passed": true
+  }
+}
