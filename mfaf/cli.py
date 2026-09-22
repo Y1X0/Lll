@@ -189,8 +189,11 @@ def _dispatch(args, db, cust, tl):
 
     if args.group == "report" and args.cmd == "generate":
         rg = ReportGenerator(db)
-        text = rg.render_markdown(args.case) if args.format == "markdown" else rg.render_json(args.case)
-        rid = f"RPT-{uuid.uuid4().hex[:12]}"
+        # مصدر معرّف واحد: collect() يولّد report_id، ونعيد استخدامه في كل مكان
+        d = rg.collect(args.case)
+        rid = d["report_id"]
+        text = (rg.render_markdown(args.case, data=d) if args.format == "markdown"
+                else rg.render_json(args.case, data=d))
         if args.out:
             with open(args.out, "w", encoding="utf-8") as fh:
                 fh.write(text)

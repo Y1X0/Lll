@@ -234,11 +234,12 @@ class ReportGenerator:
                            f"{E(h['effective_status'])}")
         return out
 
-    def render_json(self, case_id) -> str:
-        return json.dumps(self.collect(case_id), indent=2, ensure_ascii=False)
+    def render_json(self, case_id, data=None) -> str:
+        return json.dumps(data if data is not None else self.collect(case_id),
+                          indent=2, ensure_ascii=False)
 
-    def render_markdown(self, case_id) -> str:
-        d = self.collect(case_id)
+    def render_markdown(self, case_id, data=None) -> str:
+        d = data if data is not None else self.collect(case_id)
         s = d["sections"]
         md = [f"# MFAF — Forensic Report", f"**Report ID:** {d['report_id']}  ",
               f"**Generated:** {d['generated_at']}", ""]
