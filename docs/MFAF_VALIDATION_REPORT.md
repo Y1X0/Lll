@@ -63,6 +63,26 @@ Evidence, Hash, Timeline, Chain of Custody, Experiment, Limitations — وسلس
 **الخلاصة:** الفرضية **مؤكّدة برمجيًا** لكل بنودها على البيانات الاصطناعية/المحاكي.
 بند «الأجهزة الحقيقية» يبقى مفتوحًا للتحقّق الميداني (§7).
 
+## 4.1 V1 Physical Validation Status
+
+**NOT VERIFIED — PHYSICAL DEVICE REQUIRED.** لم يُنفَّذ في بيئة الذكاء الاصطناعي؛
+يُنفّذه فاحص بشري على جهاز مملوك عبر
+[`MFAF_V1_ANDROID_FIELD_PROTOCOL.md`](MFAF_V1_ANDROID_FIELD_PROTOCOL.md)، ثم تُستورَد
+النتائج بـ `mfaf v1 import` ويُعاد توليد التقرير من البيانات الفعلية.
+
+| Measurement | Result |
+|-------------|--------|
+| Device identification | NOT VERIFIED |
+| USB observation | NOT VERIFIED |
+| Authorized acquisition | NOT VERIFIED |
+| Evidence integrity | NOT VERIFIED |
+| Timeline | NOT VERIFIED |
+| Repeatability | NOT VERIFIED |
+
+لا قيم ملفّقة. بعد استيراد بيانات الفاحص، يُعاد توليد هذا الجدول من الـ dataset الفعلي.
+حالات V1 الصريحة: `NOT_VERIFIED → IN_PROGRESS → COMPLETED | PARTIAL | FAILED`.
+«تنفيذ البروتوكول» ≠ «تأكيد الفرضية». `null` في المقاييس = لم يُرصد/لم يُقَس (ليست false).
+
 ## 5. Limitations
 - V1 (Android فعلي) **لم يُنفَّذ** — لا جهاز في بيئة التنفيذ.
 - الحتمية مضمونة للمحاكي؛ الأجهزة الحقيقية ستُدخِل تباينًا زمنيًا طبيعيًا.

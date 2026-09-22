@@ -173,10 +173,30 @@ def run_all() -> dict:
         "platform": "MFAF", "version": __version__,
         "generated_at": M.utcnow(),
         "v1_physical_android": {
-            "id": "V1", "name": "Physical Android acquisition",
-            "status": "NOT_VERIFIED_PHYSICAL_DEVICE_REQUIRED",
+            "id": "V1", "name": "Physical Android field validation",
+            "status": "NOT_VERIFIED",
             "executed": False,
-            "note": "لا جهاز فعلي في بيئة التنفيذ؛ راجع البروتوكول اليدوي في MFAF_VALIDATION_REPORT.md",
+            "measurements": {
+                "device_identification": "NOT_VERIFIED",
+                "usb_observation": "NOT_VERIFIED",
+                "authorized_acquisition": "NOT_VERIFIED",
+                "evidence_integrity": "NOT_VERIFIED",
+                "timeline": "NOT_VERIFIED",
+                "repeatability": "NOT_VERIFIED",
+            },
+            "metrics": {
+                "device_identification_success": None,
+                "usb_observation_success": None,
+                "authorized_acquisition_available": None,
+                "evidence_hash_verified": None,
+                "timeline_reconstructed": None,
+                "repeatability_runs": None,
+                "repeatability_consistent": None,
+                "unexpected_behavior": None,
+            },
+            "note": ("لا جهاز فعلي في بيئة التنفيذ. يُنفَّذ يدويًا عبر "
+                     "docs/MFAF_V1_ANDROID_FIELD_PROTOCOL.md ثم `mfaf v1 import`. "
+                     "null = لم يُرصد/لم يُقَس (ليست false)."),
         },
         "checks": checks,
         "summary": {

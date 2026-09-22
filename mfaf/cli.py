@@ -29,6 +29,7 @@ from .mock_device import MockMobileDevice, MockDeviceConfig
 from .auth_harness import AuthenticationHarness
 from .report import ReportGenerator
 from .experiments import get_definition, list_codes
+from .v1_import import import_v1, V1ImportError
 from .errors import MFAFError
 
 PROVIDERS = {
@@ -94,6 +95,10 @@ def build_parser():
     rg = r.add_parser("generate"); rg.add_argument("--case", required=True)
     rg.add_argument("--format", choices=["json", "markdown"], default="json")
     rg.add_argument("--out", default=None)
+    v1 = sub.add_parser("v1").add_subparsers(dest="cmd", required=True)
+    v1i = v1.add_parser("import"); v1i.add_argument("--file", required=True)
+    v1i.add_argument("--case", required=True)
+
     return p
 
 
@@ -198,6 +203,23 @@ def _dispatch(args, db, cust, tl):
             db.add_report(rid, args.case, args.format, None)
             print(text)
         return 0
+    if args.group == "v1" and args.cmd == "import":
+        try:
+            rec = import_v1(db, args.file, args.case, actor=args.actor, timeline=tl)
+        except V1ImportError as e:
+            _out({"error": "V1ImportError", "message": str(e)}); return 2
+        # سجّل حدث عهدة للاستيراد (لا يقيّد V1 كناجح)
+        cust.append(args.actor, "EVIDENCE_ANALYZED", case_id=args.case,
+                    metadata={"v1_import": rec["import_id"],
+                              "effective_status": rec["effective_status"]})
+        _out({"import_id": rec["import_id"], "case_id": rec["case_id"],
+              "declared_status": rec["declared_status"],
+              "effective_status": rec["effective_status"],
+              "observation_count": rec["observation_count"],
+              "timeline_events_created": rec["timeline_events_created"],
+              "note": "schema valid; V1 NOT auto-verified — status derived from examiner observations"})
+        return 0
+
     _out({"error": "usage"}); return 1
 
 

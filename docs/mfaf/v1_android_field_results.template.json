@@ -1,0 +1,58 @@
+{
+  "validation_version": "V1",
+  "status": "NOT_VERIFIED",
+  "_status_help": "أحد: NOT_VERIFIED | IN_PROGRESS | COMPLETED | PARTIAL | FAILED. لا تكتب VERIFIED. تبقى NOT_VERIFIED حتى يُدخل فاحص بشري ملاحظات فعلية.",
+  "examiner": {
+    "examiner_id": "",
+    "name": "",
+    "organization": ""
+  },
+  "case": {
+    "case_id": "",
+    "legal_authority": "",
+    "ownership_authorization_record": ""
+  },
+  "device": {
+    "device_id": "",
+    "manufacturer": null,
+    "model": null,
+    "os_family": "android",
+    "os_version": null,
+    "security_patch_level": null,
+    "usb_vid": null,
+    "usb_pid": null,
+    "serial": null,
+    "usb_debugging_state": null,
+    "connection_mode": null
+  },
+  "environment": {
+    "mfaf_version": "0.1.0",
+    "mfaf_commit": "",
+    "host_os": "",
+    "test_environment": "isolated-lab",
+    "date": ""
+  },
+  "observations": [],
+  "_observations_help": "كل عنصر: {\"timestamp\":\"...\",\"observation\":\"...\",\"type\":\"BASELINE|USB|ACQUISITION|SECURITY_CONTROL|OTHER\"}",
+  "acquisitions": [],
+  "_acquisitions_help": "كل عنصر: {\"provider\":\"...\",\"status\":\"COMPLETED|NOT_AVAILABLE|FAILED\",\"reason\":\"...\"}",
+  "evidence": [],
+  "_evidence_help": "كل عنصر: {\"evidence_id\":\"...\",\"original_filename\":\"...\",\"byte_size\":0,\"sha256\":\"...\"}",
+  "timeline": [],
+  "_timeline_help": "كل عنصر: {\"event_type\":\"USB_CONNECTED|DEVICE_IDENTIFIED|ACQUISITION_STARTED|ACQUISITION_COMPLETED|ACQUISITION_NOT_AVAILABLE|USB_DISCONNECTED\",\"timestamp\":\"...\",\"description\":\"...\"}",
+  "integrity_checks": [],
+  "_integrity_help": "كل عنصر: {\"evidence_id\":\"...\",\"result\":\"VERIFIED|MISMATCH|MISSING|ERROR\"}",
+  "limitations": [],
+  "raw_logs": [],
+  "metrics": {
+    "device_identification_success": null,
+    "usb_observation_success": null,
+    "authorized_acquisition_available": null,
+    "evidence_hash_verified": null,
+    "timeline_reconstructed": null,
+    "repeatability_runs": null,
+    "repeatability_consistent": null,
+    "unexpected_behavior": null
+  },
+  "_metrics_help": "true/false/null فقط. null = لم يُرصد/لا ينطبق/لم يُقَس — وليست false."
+}

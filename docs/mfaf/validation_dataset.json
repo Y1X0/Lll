@@ -1,13 +1,31 @@
 {
   "platform": "MFAF",
   "version": "0.1.0",
-  "generated_at": "2026-09-22T03:49:39.704556+00:00",
+  "generated_at": "2026-09-22T04:02:19.216381+00:00",
   "v1_physical_android": {
     "id": "V1",
-    "name": "Physical Android acquisition",
-    "status": "NOT_VERIFIED_PHYSICAL_DEVICE_REQUIRED",
+    "name": "Physical Android field validation",
+    "status": "NOT_VERIFIED",
     "executed": false,
-    "note": "لا جهاز فعلي في بيئة التنفيذ؛ راجع البروتوكول اليدوي في MFAF_VALIDATION_REPORT.md"
+    "measurements": {
+      "device_identification": "NOT_VERIFIED",
+      "usb_observation": "NOT_VERIFIED",
+      "authorized_acquisition": "NOT_VERIFIED",
+      "evidence_integrity": "NOT_VERIFIED",
+      "timeline": "NOT_VERIFIED",
+      "repeatability": "NOT_VERIFIED"
+    },
+    "metrics": {
+      "device_identification_success": null,
+      "usb_observation_success": null,
+      "authorized_acquisition_available": null,
+      "evidence_hash_verified": null,
+      "timeline_reconstructed": null,
+      "repeatability_runs": null,
+      "repeatability_consistent": null,
+      "unexpected_behavior": null
+    },
+    "note": "لا جهاز فعلي في بيئة التنفيذ. يُنفَّذ يدويًا عبر docs/MFAF_V1_ANDROID_FIELD_PROTOCOL.md ثم `mfaf v1 import`. null = لم يُرصد/لم يُقَس (ليست false)."
   },
   "checks": [
     {
